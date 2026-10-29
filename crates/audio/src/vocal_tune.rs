@@ -295,11 +295,21 @@ impl VocalTune {
         self.pitch_hz = Some(hz);
         self.clarity = (1.0 - self.scores[lag]).clamp(0.0, 1.0);
         let midi = 69.0 + 12.0 * (hz / self.params.reference_hz).log2();
-        let next = nearest_note_with_mask(midi, self.params.root, self.params.scale, self.params.custom_notes);
+        let next = nearest_note_with_mask(
+            midi,
+            self.params.root,
+            self.params.scale,
+            self.params.custom_notes,
+        );
         let next = match (next, self.note) {
             (Some(n), Some(prev))
                 if n != prev
-                    && allowed(prev, self.params.root, self.params.scale, self.params.custom_notes)
+                    && allowed(
+                        prev,
+                        self.params.root,
+                        self.params.scale,
+                        self.params.custom_notes,
+                    )
                     && (midi - prev as f32).abs() < (midi - n as f32).abs() + 0.10 =>
             {
                 Some(prev)
@@ -391,8 +401,14 @@ mod tests {
     #[test]
     fn custom_note_map_only_uses_enabled_notes() {
         let mask = (1 << 0) | (1 << 7); // C and G in any octave
-        assert_eq!(nearest_note_with_mask(61.0, 0, Scale::Custom, mask), Some(60));
-        assert_eq!(nearest_note_with_mask(66.6, 0, Scale::Custom, mask), Some(67));
+        assert_eq!(
+            nearest_note_with_mask(61.0, 0, Scale::Custom, mask),
+            Some(60)
+        );
+        assert_eq!(
+            nearest_note_with_mask(66.6, 0, Scale::Custom, mask),
+            Some(67)
+        );
         assert_eq!(nearest_note_with_mask(60.0, 0, Scale::Custom, 0), None);
     }
     #[test]

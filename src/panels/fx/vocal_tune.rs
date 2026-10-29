@@ -18,18 +18,22 @@ fn live_pitch(
     let feed = live_analysis(ui, module.instance_id).and_then(|s| analysis::vocal_tune(&s));
     let caption = match feed {
         Some((hz, Some(target), ratio, clarity)) if hz > 0.0 && hz.is_finite() => {
-            const NOTES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+            const NOTES: [&str; 12] = [
+                "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+            ];
             let note = target.rem_euclid(12) as usize;
             let octave = target.div_euclid(12) - 1;
             let correction = 1200.0 * ratio.max(0.0001).log2();
             format!(
                 "IN {hz:.1} Hz   TO {}{octave}   SHIFT {correction:+.0}c   CONF {:.0}%",
-                NOTES[note], clarity * 100.0
+                NOTES[note],
+                clarity * 100.0
             )
         }
         _ => "IN -- Hz   TARGET --   Waiting for voiced audio".to_string(),
     };
-    ui.painter().rect_filled(rect, 4.0, cx.theme.colors.control_fill.to_color32());
+    ui.painter()
+        .rect_filled(rect, 4.0, cx.theme.colors.control_fill.to_color32());
     ui.painter().text(
         rect.center(),
         Align2::CENTER_CENTER,
@@ -48,7 +52,9 @@ pub fn panel() -> Option<Panel> {
             spinner(3, "Scale").p(2),
             knob(4, "Correction").p(3),
             knob(5, "Retune").p(4),
-        ]).h(Size::U(3.74)).show(Show::Tab(0)),
+        ])
+        .h(Size::U(3.74))
+        .show(Show::Tab(0)),
         vstack([
             hstack([
                 toggle(14, "C").p(12),
@@ -57,7 +63,8 @@ pub fn panel() -> Option<Panel> {
                 toggle(17, "D#").p(15),
                 toggle(18, "E").p(16),
                 toggle(19, "F").p(17),
-            ]).h(Size::U(1.87)),
+            ])
+            .h(Size::U(1.87)),
             hstack([
                 toggle(20, "F#").p(18),
                 toggle(21, "G").p(19),
@@ -65,26 +72,39 @@ pub fn panel() -> Option<Panel> {
                 toggle(23, "A").p(21),
                 toggle(24, "A#").p(22),
                 toggle(25, "B").p(23),
-            ]).h(Size::U(1.87)),
-        ]).h(Size::U(3.74)).show(Show::Tab(1)),
+            ])
+            .h(Size::U(1.87)),
+        ])
+        .h(Size::U(3.74))
+        .show(Show::Tab(1)),
         hstack([
             knob(6, "Humanize").p(6),
             knob(7, "Sensitivity").p(7),
             knob(8, "Deadband").p(8),
             knob(26, "Protect").p(24),
-        ]).h(Size::U(3.74)).show(Show::Tab(2)),
+        ])
+        .h(Size::U(3.74))
+        .show(Show::Tab(2)),
         hstack([
             knob(10, "Mix").p(5),
             knob(11, "Reference").p(9),
             toggle(12, "Hard Tune").p(10),
             knob(9, "Fine Tune").p(11),
-        ]).h(Size::U(3.74)).show(Show::Tab(3)),
+        ])
+        .h(Size::U(3.74))
+        .show(Show::Tab(3)),
         display(13).h(Size::U(2.0)).draw(live_pitch),
     ])))
 }
 
 #[cfg(test)]
-const TABS: Row = row(1, Widget::Tabs, "TUNE · NOTES · EXPRESSION · OUTPUT", [0.0, 0.0, 14.0, 1.25]).h(Size::U(1.25));
+const TABS: Row = row(
+    1,
+    Widget::Tabs,
+    "TUNE · NOTES · EXPRESSION · OUTPUT",
+    [0.0, 0.0, 14.0, 1.25],
+)
+.h(Size::U(1.25));
 #[cfg(test)]
 const MONITOR: Row = row(13, Widget::Display, "", [0.0, 4.99, 14.0, 2.0]);
 
