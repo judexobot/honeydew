@@ -47,9 +47,9 @@ mod transpose;
 mod tremolo;
 mod tuned_eq;
 mod tuner;
+mod vocal_tune;
 mod waveshaper;
 mod wow_flutter;
-mod vocal_tune;
 // Not in `modules!`: Honeydew's own effects, outside the registry's `modules()`.
 pub(super) mod lemon;
 

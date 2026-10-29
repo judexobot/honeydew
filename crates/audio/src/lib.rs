@@ -27,7 +27,6 @@ pub mod note_effects;
 pub mod ogg_writer;
 pub mod pitcher;
 pub mod pitcher2;
-pub mod vocal_tune;
 pub mod playback;
 mod reverbs;
 pub mod sample;
@@ -40,6 +39,7 @@ pub mod supersaw;
 mod tape_stop;
 pub mod three_osc;
 pub mod transistor_bass;
+pub mod vocal_tune;
 pub mod voice;
 pub mod wav_writer;
 pub mod waveshaper;
@@ -466,8 +466,8 @@ impl AudioEffect {
                 if (rate as f32 - sample_rate).abs() > 0.001 {
                     return Err(EffectError::InvalidSampleRate);
                 }
-                let mut state = vocal_tune::VocalTune::new(rate)
-                    .map_err(|_| EffectError::InvalidSampleRate)?;
+                let mut state =
+                    vocal_tune::VocalTune::new(rate).map_err(|_| EffectError::InvalidSampleRate)?;
                 state.set_parameters(vocal_tune::Parameters {
                     root: 0,
                     scale: vocal_tune::Scale::Chromatic,
@@ -572,8 +572,10 @@ impl AudioEffect {
         if sample_rate != self.sample_rate {
             self.sample_rate = sample_rate;
             if let Processor::VocalTune(state) = &mut self.processor {
-                *state = Box::new(vocal_tune::VocalTune::new(sample_rate as u32)
-                    .map_err(|_| EffectError::InvalidSampleRate)?);
+                *state = Box::new(
+                    vocal_tune::VocalTune::new(sample_rate as u32)
+                        .map_err(|_| EffectError::InvalidSampleRate)?,
+                );
             }
             // ponytail: the Analyzer's settings go back to a new module's here; no host changes the rate of a built
             // effect yet (the engine rebuilds and re-applies them), carry them over if one does.
@@ -906,7 +908,9 @@ impl Processor {
                     _ => vocal_tune::Scale::Chromatic,
                 };
                 state.set_parameters(vocal_tune::Parameters {
-                    root, scale, correction: params[3],
+                    root,
+                    scale,
+                    correction: params[3],
                     retune_ms: 2.0 + 298.0 * params[4].powi(2),
                     wet: params[5],
                 });

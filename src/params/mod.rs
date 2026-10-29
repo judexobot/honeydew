@@ -8,7 +8,6 @@ mod channel;
 mod display;
 mod effects;
 mod effects_24_51;
-mod vocal_tune;
 #[cfg(test)]
 mod inst_rows;
 #[cfg(test)]
@@ -21,6 +20,7 @@ mod spec_rows;
 mod step_tests;
 #[cfg(test)]
 mod tests;
+mod vocal_tune;
 
 pub use channel::{CHANNEL_PARAMS, COMMON_PARAMS, DRUM_SLOT_PARAMS};
 pub(crate) use display::clamp01;
@@ -290,7 +290,10 @@ impl ModuleSpec {
 
 /// Every registered effect and note effect in id order (the two data tables are consecutive id ranges).
 pub fn modules() -> impl Iterator<Item = &'static ModuleSpec> {
-    effects::MODULES.iter().chain(effects_24_51::MODULES).chain(vocal_tune::MODULES)
+    effects::MODULES
+        .iter()
+        .chain(effects_24_51::MODULES)
+        .chain(vocal_tune::MODULES)
 }
 
 /// Every registered instrument in id order.
