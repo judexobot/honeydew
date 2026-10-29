@@ -368,7 +368,8 @@ pub fn nearest_note_with_mask(midi: f32, root: u8, scale: Scale, custom_notes: u
         return None;
     }
     let around = midi.round() as i32;
-    (-2..=2)
+    // Any custom scale can skip several semitones. Search a full octave both ways.
+    (-12..=12)
         .map(|i| around + i)
         .filter(|&n| allowed(n, root % 12, scale, custom_notes))
         .min_by(|a, b| {

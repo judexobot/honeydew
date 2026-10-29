@@ -63,7 +63,7 @@ const OVERVIEW: [(u16, &str, &str, usize, bool, Role); 40] = [
         false,
         Role::NoteEffect,
     ),
-    (53, "VocalTune", "VocalTune", 12, false, Role::Effect),
+    (53, "VocalTune", "VocalTune", 25, false, Role::Effect),
 ];
 
 fn spec(id: u16) -> &'static ModuleSpec {
@@ -166,7 +166,7 @@ fn tab_strips_follow_the_pages_column() {
         (45, &["TUNING", "EXPRESSION", "OPTIONS"]),
         (47, &["TIME", "PITCH", "VELOCITY", "PAN"]),
         (51, &["GLOBAL", "ARP 1", "ARP 2"]),
-        (53, &["TUNE", "EXPRESSION", "OUTPUT"]),
+        (53, &["TUNE", "NOTES", "EXPRESSION", "OUTPUT"]),
     ];
     for (id, ..) in OVERVIEW {
         let want: &[&str] = expected.iter().find(|e| e.0 == id).map_or(&[], |e| e.1);
