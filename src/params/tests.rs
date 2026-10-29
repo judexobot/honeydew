@@ -620,7 +620,7 @@ fn rows_range_samples() {
 }
 
 /// Rows with a "min … mid … max" range that is not a toggle: counted by hand from the tables.
-const CHECKED_SAMPLE_ROWS: usize = 155;
+const CHECKED_SAMPLE_ROWS: usize = 160;
 
 // ---- formats the later modules use ----
 
