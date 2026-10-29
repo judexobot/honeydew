@@ -1,0 +1,55 @@
+name: Game Boy DMG APU Android
+on:
+  push:
+    branches: [feature/gameboy-dmg-apu]
+  workflow_dispatch:
+concurrency:
+  group: gameboy-apu-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  apu-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          sparse-checkout: |
+            crates/audio/src/gameboy_apu.rs
+          sparse-checkout-cone-mode: false
+      - uses: dtolnay/rust-toolchain@1.91.0
+      - name: Compile and run DMG APU register/clock tests
+        run: |
+          rustc --edition 2024 --test crates/audio/src/gameboy_apu.rs -o /tmp/gameboy-apu-tests
+          /tmp/gameboy-apu-tests --nocapture
+  android:
+    needs: apu-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install toolchain
+        run: |
+          sudo apt-get update && sudo apt-get install -y libclang-dev
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.0.13004108'
+          cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Build signed debug APK with bundled assets
+        run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.0.13004108" tools/android-dist.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Honeydew-GameBoy-APU-Android-arm64-debug
+          path: target/honeydew-android-*-arm64-debug.apk
+          if-no-files-found: error
+          retention-days: 7
