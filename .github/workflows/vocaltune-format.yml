@@ -17,7 +17,7 @@ jobs:
           components: rustfmt
       - name: Apply rustfmt on branch only
         run: |
-          cargo fmt --all
+          rustfmt --edition 2024 --config skip_children=true crates/audio/src/lib.rs crates/audio/src/vocal_tune.rs src/params/mod.rs src/params/vocal_tune.rs src/panels/fx/mod.rs src/panels/fx/vocal_tune.rs src/ui/modules_browser.rs
           git add crates/audio/src/lib.rs crates/audio/src/vocal_tune.rs src/params/mod.rs src/params/vocal_tune.rs src/panels/fx/mod.rs src/panels/fx/vocal_tune.rs src/ui/modules_browser.rs
           if ! git diff --cached --quiet; then
             git config user.name 'github-actions[bot]'
