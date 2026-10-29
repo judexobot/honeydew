@@ -93,7 +93,7 @@ modules! {
     49 => randomizer,
     50 => scale,
     51 => arpeggiator,
-    52 => vocal_tune,
+    53 => vocal_tune,
 }
 
 /// Where the rack posts a module's latest meter (a [`MeterSnapshot`]) for its panel's draws, in egui temp data: under

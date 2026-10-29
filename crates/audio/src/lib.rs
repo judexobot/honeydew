@@ -98,7 +98,7 @@ pub fn effect_info(id: u16) -> Option<EffectInfo> {
         44 => ("Spreader", 5),
         45 => ("Pitcher 2", 27),
         46 => ("Tremolo", 12),
-        52 => ("VocalTune", 6),
+        53 => ("VocalTune", 6),
         lemon::REVERB => ("Lemon Reverb", lemon::REVERB_MID_SIDE + 1),
         lemon::LIMITER => ("Lemon Limiter", lemon::LIMITER_SAFETY + 1),
         _ => return None,
@@ -460,7 +460,7 @@ impl AudioEffect {
                 ],
                 Processor::Tremolo(TremoloState::default()),
             ),
-            52 => {
+            53 => {
                 let params = vec![1.0, 0.0, 0.0, 1.0, 0.25, 1.0];
                 let rate = sample_rate as u32;
                 if (rate as f32 - sample_rate).abs() > 0.001 {
@@ -561,7 +561,7 @@ impl AudioEffect {
         if !sample_rate.is_finite() || sample_rate <= 0.0 {
             return Err(EffectError::InvalidSampleRate);
         }
-        if self.id == 52
+        if self.id == 53
             && (sample_rate.fract() != 0.0 || !(22_050.0..=96_000.0).contains(&sample_rate))
         {
             return Err(EffectError::InvalidSampleRate);

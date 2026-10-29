@@ -1,4 +1,4 @@
-//! VocalTune v0.3 panel, effect ID 52.
+//! VocalTune v0.3 panel, effect ID 53.
 use crate::panels::build::*;
 pub fn panel() -> Option<Panel> {
     Some(Panel::new(hstack([

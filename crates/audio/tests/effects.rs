@@ -18,7 +18,7 @@ fn settle_common(effect: &mut AudioEffect) {
 fn registry_covers_and_constructs_audio_effects() {
     let ids = [
         3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 24, 25, 26, 27, 28, 29, 30, 32,
-        34, 35, 36, 40, 41, 42, 43, 44, 45, 46,
+        34, 35, 36, 40, 41, 42, 43, 44, 45, 46, 53,
     ];
     for id in ids {
         assert!(effect_info(id).is_some(), "missing ID {id}");
@@ -1031,13 +1031,14 @@ fn enable_is_on_from_one_half_for_every_effect() {
             5 => &[(3, 1.0)],
             18 => &[(1, 0.1)],
             42 => &[(5, 0.0)],
+            53 => &[(1, 1.0 / 11.0), (2, 0.5)], // C# major excludes A3
             _ => &[],
         }
     };
     let ids: Vec<u16> = (0..64)
         .filter(|&id| AudioEffect::new(id, CTX.sample_rate).is_ok())
         .collect();
-    assert_eq!(ids.len(), 34);
+    assert_eq!(ids.len(), 35);
     for id in ids {
         let steps = |v| [setup(id), &[(0, v)]].concat();
         let audible = two_state(id, steps, true);

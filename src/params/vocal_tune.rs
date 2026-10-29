@@ -1,4 +1,4 @@
-//! VocalTune v0.3 parameter registry, independent effect ID 52.
+//! VocalTune v0.3 parameter registry, independent effect ID 53.
 use super::{Display, ModuleSpec, ParamSpec as P};
 const KEYS: &[&str] = &[
     "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
@@ -17,7 +17,7 @@ const PARAMETERS: &[P] = &[
     P::cont("Wet", 1.0, Display::linear(0.0, 100.0, 0, "%")),
 ];
 pub static MODULES: &[ModuleSpec] = &[ModuleSpec::effect(
-    52,
+    53,
     "VocalTune",
     "VocalTune",
     false,

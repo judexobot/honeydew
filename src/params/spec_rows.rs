@@ -447,4 +447,10 @@ pub const ROWS: &[Row] = &[
     (51, 23, r#"Octave shift (Arp 2)"#, 0.5, r#"None"#, r#"options: -3 oct, -2 oct, -1 oct, None, +1 oct, +2 oct, +3 oct"#),
     (51, 16, r#"(none)"#, 0.0, r#"0"#, r#"0…100 (v×100)"#),
     (51, 27, r#"(none)"#, 0.0, r#"0"#, r#"0…100 (v×100)"#),
+    (53, 0, r#"Enable"#, 1.0, r#"On"#, r#"options: Off, On"#),
+    (53, 1, r#"Key"#, 0.0, r#"C"#, r#"options: C, C#, D, D#, E, F, F#, G, G#, A, A#, B"#),
+    (53, 2, r#"Scale"#, 0.0, r#"Chromatic"#, r#"options: Chromatic, Major, Minor"#),
+    (53, 3, r#"Correction"#, 1.0, r#"100%"#, r#"0% … 100%"#),
+    (53, 4, r#"Retune Speed"#, 0.25, r#"21 ms"#, r#"2 ms … 300 ms"#),
+    (53, 5, r#"Wet"#, 1.0, r#"100%"#, r#"0% … 100%"#),
 ];
