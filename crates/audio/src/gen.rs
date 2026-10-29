@@ -226,7 +226,7 @@ impl Gen {
                 let hz = midi_frequency(key) * 2.0f32.powf(bend / 12.0);
                 tone.phase = (tone.phase + hz / self.rate).fract();
                 let signal = if tone.phase < 0.5 { 1.0 } else { -1.0 };
-                let gain = self.params[44+i] * tone.velocity * 0.2;
+                let gain = self.params[44+i] * tone.velocity * 0.65;
                 let pos = (tone.pan - 0.5) * self.params[50] + 0.5;
                 lr[0] += signal * gain * (1.0 - pos);
                 lr[1] += signal * gain * pos;
