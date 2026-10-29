@@ -1334,3 +1334,26 @@ fn filter_spreader_and_multifx_are_unchanged_at_44_1_khz_and_above() {
         "unexpected render hash: {hash:016x}"
     );
 }
+
+#[test]
+fn console_color_is_a_live_audio_effect_with_four_profiles() {
+    let info = effect_info(56).expect("Console Color is registered");
+    assert_eq!(info.parameter_count, 11);
+    let mut totals = [0.0_f32; 4];
+    for (mode, total) in totals.iter_mut().enumerate() {
+        let mut effect = AudioEffect::new(56, CTX.sample_rate).unwrap();
+        effect.set_parameter(1, mode as f32 / 3.0).unwrap();
+        effect.set_parameter(5, 0.0).unwrap(); // disable echoes for this spectral test
+        let mut left = vec![0.0; 4096];
+        let mut right = vec![0.0; 4096];
+        for (i, sample) in left.iter_mut().enumerate() {
+            *sample = (i as f32 * 0.17).sin() * 0.5;
+        }
+        effect.process(&mut left, &mut right, CTX).unwrap();
+        assert!(left.iter().all(|x| x.is_finite()));
+        assert!(right.iter().all(|x| x.is_finite()));
+        *total = left.iter().map(|v| v.abs()).sum::<f32>();
+        assert!(*total > 0.01);
+    }
+    assert!((totals[0] - totals[1]).abs() > 0.01);
+}
