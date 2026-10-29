@@ -35,3 +35,13 @@ fn actual_output_is_tuned_closer_to_440() {
     assert!((strongest.0 - 440).abs() <= 5,
         "expected pitch near 440 Hz, got {} Hz", strongest.0);
 }
+
+#[test]
+fn supports_android_and_offline_render_sample_rates() {
+    for rate in [8_000_u32, 16_000, 22_050, 44_100, 48_000, 96_000, 192_000] {
+        let mut effect = VocalTune::new(rate).expect("supported playback rate");
+        let (l, r) = effect.process_frame(0.5, -0.5);
+        assert!(l.is_finite() && r.is_finite(), "rate: {rate}");
+    }
+    assert!(VocalTune::new(7_999).is_err());
+}
