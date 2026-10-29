@@ -100,6 +100,8 @@ pub struct VocalTune {
     target_ratio: f32,
     clarity: f32,
     sibilance: f32,
+    sibilance_smoothed: f32,
+    wet_mix_smoothed: f32,
     voiced: f32,
     sustain: usize,
     base_midi: f32,
@@ -162,6 +164,8 @@ impl VocalTune {
             target_ratio: 1.0,
             clarity: 0.0,
             sibilance: 0.0,
+            sibilance_smoothed: 0.0,
+            wet_mix_smoothed: 0.0,
             voiced: 0.0,
             sustain: 0,
             base_midi: 69.0,
@@ -263,6 +267,8 @@ impl VocalTune {
         self.sustain = 0;
         self.clarity = 0.0;
         self.sibilance = 0.0;
+        self.sibilance_smoothed = 0.0;
+        self.wet_mix_smoothed = 0.0;
         self.pitch_count = 0;
         self.gain = self.target_gain;
         self.bypass = f32::from(self.params.enabled);
@@ -339,10 +345,20 @@ impl VocalTune {
             self.params.formant_shift,
             self.params.protect_sibilants,
         );
-        let mix = self.params.wet
+        // Smooth pitch confidence, consonant protection and Wet automation together.
+        // Abrupt detector changes must never hard-switch the spectral output against the dry voice.
+        let consonant_alpha = 1.0 - (-1.0 / (self.rate * 0.008)).exp();
+        self.sibilance_smoothed +=
+            (self.sibilance - self.sibilance_smoothed) * consonant_alpha;
+        let confidence = ((self.clarity - 0.28) / 0.52).clamp(0.0, 1.0);
+        let target_mix = self.params.wet
             * self.voiced
-            * (1.0 - self.sibilance * self.params.protect_sibilants)
+            * confidence
+            * (1.0 - self.sibilance_smoothed * self.params.protect_sibilants)
             * self.bypass;
+        let wet_alpha = 1.0 - (-1.0 / (self.rate * 0.012)).exp();
+        self.wet_mix_smoothed += (target_mix - self.wet_mix_smoothed) * wet_alpha;
+        let mix = self.wet_mix_smoothed.clamp(0.0, 1.0);
         let gain = 1.0 + (self.gain - 1.0) * self.bypass;
         let mut output = [
             self.dry.0 + (wet[0] - self.dry.0) * mix,
