@@ -166,7 +166,11 @@ impl VocalTune {
             self.analyze();
         }
         let held = (self.sustain_samples as f32 / (0.35 * self.rate)).min(1.0);
-        let humanize = if self.params.hard_tune { 0.0 } else { self.params.humanize };
+        let humanize = if self.params.hard_tune {
+            0.0
+        } else {
+            self.params.humanize
+        };
         let alpha = if self.params.hard_tune {
             1.0 - (-1000.0 / (2.0 * self.rate)).exp()
         } else {
