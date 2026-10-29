@@ -166,9 +166,13 @@ fn seeking_between_same_pitch_on_distinct_apu_channels_releases_the_old_address(
     let mut output = [0.0; 256];
     engine.play();
     engine.render(&mut output, 2);
+    // The channel meter has no analysis. Target the instrument's meter instead.
     let index = (0..engine.meter_count())
-        .find(|&i| engine.meter_key(i).channel == 1)
-        .unwrap();
+        .find(|&i| {
+            let key = engine.meter_key(i);
+            key.channel == 1 && key.instance_id == 2
+        })
+        .expect("Game Boy instrument meter");
     assert_eq!(&engine.analysis(index)[..2], &[1.0, 0.0]);
     engine.seek(u64::from(PPQ) * 2);
     engine.render(&mut output, 2);
