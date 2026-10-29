@@ -468,7 +468,12 @@ impl AudioEffect {
             ),
             56 => {
                 let params = console_color::DEFAULTS.to_vec();
-                (params, Processor::ConsoleColor(Box::new(console_color::ConsoleColor::new(sample_rate))))
+                (
+                    params,
+                    Processor::ConsoleColor(Box::new(console_color::ConsoleColor::new(
+                        sample_rate,
+                    ))),
+                )
             }
             53 => {
                 let params = vocal_tune::DEFAULTS.to_vec();
