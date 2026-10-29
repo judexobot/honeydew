@@ -92,16 +92,16 @@ impl ConsoleColor {
             .min(internal_rate * 0.45).min(self.rate * 0.45).max(90.0);
         let pole = 1.0 - (-std::f32::consts::TAU * cutoff / self.rate).exp();
         let x = [l, r];
-        for channel in 0..2 {
-            self.low[channel] += (x[channel].clamp(-4.0, 4.0) - self.low[channel]) * pole;
+        for (low, input) in self.low.iter_mut().zip(x) {
+            *low += (input.clamp(-4.0, 4.0) - *low) * pole;
         }
         self.phase += f64::from(internal_rate / self.rate);
         if self.phase >= 1.0 {
             self.phase -= self.phase.floor();
             let bits = (mode.native_bits() as f32 - self.params[2] * 7.0).round().clamp(5.0, 16.0);
             let steps = 2.0f32.powf(bits - 1.0);
-            for channel in 0..2 {
-                self.held[channel] = (self.low[channel] * steps).round() / steps;
+            for (held, low) in self.held.iter_mut().zip(self.low) {
+                *held = (low * steps).round() / steps;
             }
         }
         // Feed an 8-tap echo FIR at the host rate. Presets intentionally differ:
