@@ -19,7 +19,7 @@ fn actual_output_is_tuned_closer_to_440() {
     let rate = 48_000.0_f64;
     let mut fx = VocalTune::new(rate as u32).unwrap();
     fx.set_parameters(Parameters { root: 0, scale: Scale::Chromatic,
-        correction: 1.0, retune_ms: 2.0, wet: 1.0 });
+        correction: 1.0, retune_ms: 2.0, wet: 1.0, ..Parameters::default() });
     let mut output = Vec::new();
     for i in 0..120_000 {
         let x = (2.0 * PI * 450.0 * i as f64 / rate).sin() as f32 * 0.5;

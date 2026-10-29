@@ -98,7 +98,7 @@ pub fn effect_info(id: u16) -> Option<EffectInfo> {
         44 => ("Spreader", 5),
         45 => ("Pitcher 2", 27),
         46 => ("Tremolo", 12),
-        53 => ("VocalTune", 6),
+        53 => ("VocalTune", 12),
         lemon::REVERB => ("Lemon Reverb", lemon::REVERB_MID_SIDE + 1),
         lemon::LIMITER => ("Lemon Limiter", lemon::LIMITER_SAFETY + 1),
         _ => return None,
@@ -474,6 +474,7 @@ impl AudioEffect {
                     correction: 1.0,
                     retune_ms: 2.0 + 298.0 * 0.25_f32.powi(2),
                     wet: 1.0,
+                    ..vocal_tune::Parameters::default()
                 });
                 (params, Processor::VocalTune(Box::new(state)))
             }
@@ -562,7 +563,7 @@ impl AudioEffect {
             return Err(EffectError::InvalidSampleRate);
         }
         if self.id == 53
-            && (sample_rate.fract() != 0.0 || !(22_050.0..=96_000.0).contains(&sample_rate))
+            && (sample_rate.fract() != 0.0 || !(8_000.0..=192_000.0).contains(&sample_rate))
         {
             return Err(EffectError::InvalidSampleRate);
         }
@@ -902,9 +903,11 @@ impl Processor {
             }
             Self::VocalTune(state) => {
                 let root = (params[1] * 11.0).round() as u8;
-                let scale = match (params[2] * 2.0).round() as u8 {
+                let scale = match (params[2] * 4.0).round() as u8 {
                     1 => vocal_tune::Scale::Major,
                     2 => vocal_tune::Scale::Minor,
+                    3 => vocal_tune::Scale::Pentatonic,
+                    4 => vocal_tune::Scale::Blues,
                     _ => vocal_tune::Scale::Chromatic,
                 };
                 state.set_parameters(vocal_tune::Parameters {
@@ -913,6 +916,12 @@ impl Processor {
                     correction: params[3],
                     retune_ms: 2.0 + 298.0 * params[4].powi(2),
                     wet: params[5],
+                    humanize: params[6],
+                    sensitivity: params[7],
+                    deadband_cents: 50.0 * params[8],
+                    reference_hz: 430.0 + 20.0 * params[9],
+                    hard_tune: params[10] >= 0.5,
+                    detune_cents: -50.0 + 100.0 * params[11],
                 });
             }
             Self::Comb(state) => state.refresh(params, sample_rate),

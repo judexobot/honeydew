@@ -15,6 +15,8 @@ pub enum Scale {
     Chromatic,
     Major,
     Minor,
+    Pentatonic,
+    Blues,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -24,6 +26,12 @@ pub struct Parameters {
     pub correction: f32,
     pub retune_ms: f32,
     pub wet: f32,
+    pub humanize: f32,
+    pub sensitivity: f32,
+    pub deadband_cents: f32,
+    pub reference_hz: f32,
+    pub hard_tune: bool,
+    pub detune_cents: f32,
 }
 impl Default for Parameters {
     fn default() -> Self {
@@ -33,6 +41,12 @@ impl Default for Parameters {
             correction: 1.0,
             retune_ms: 25.0,
             wet: 1.0,
+            humanize: 0.2,
+            sensitivity: 0.5,
+            deadband_cents: 5.0,
+            reference_hz: 440.0,
+            hard_tune: false,
+            detune_cents: 0.0,
         }
     }
 }
@@ -55,10 +69,11 @@ pub struct VocalTune {
     voiced: f32,
     pitch_hz: Option<f32>,
     note: Option<i32>,
+    sustain_samples: u64,
 }
 impl VocalTune {
     pub fn new(rate: u32) -> Result<Self, &'static str> {
-        if !(22_050..=96_000).contains(&rate) {
+        if !(8_000..=192_000).contains(&rate) {
             return Err("unsupported sample rate");
         }
         let rate = rate as f32;
@@ -80,6 +95,7 @@ impl VocalTune {
             voiced: 0.0,
             pitch_hz: None,
             note: None,
+            sustain_samples: 0,
         };
         out.set_parameters(Parameters::default());
         Ok(out)
@@ -91,6 +107,12 @@ impl VocalTune {
             correction: finite_clamp(p.correction, 0.0, 1.0, 1.0),
             retune_ms: finite_clamp(p.retune_ms, 2.0, 300.0, 25.0),
             wet: finite_clamp(p.wet, 0.0, 1.0, 1.0),
+            humanize: finite_clamp(p.humanize, 0.0, 1.0, 0.2),
+            sensitivity: finite_clamp(p.sensitivity, 0.0, 1.0, 0.5),
+            deadband_cents: finite_clamp(p.deadband_cents, 0.0, 50.0, 5.0),
+            reference_hz: finite_clamp(p.reference_hz, 430.0, 450.0, 440.0),
+            hard_tune: p.hard_tune,
+            detune_cents: finite_clamp(p.detune_cents, -50.0, 50.0, 0.0),
         };
         self.retune_alpha = 1.0 - (-1000.0 / (self.params.retune_ms * self.rate)).exp();
     }
@@ -123,6 +145,7 @@ impl VocalTune {
         self.voiced = 0.0;
         self.pitch_hz = None;
         self.note = None;
+        self.sustain_samples = 0;
     }
     pub fn process(&mut self, left: &mut [f32], right: &mut [f32]) -> Result<(), &'static str> {
         if left.len() != right.len() {
@@ -142,7 +165,14 @@ impl VocalTune {
         if self.written >= 4096 && self.written.is_multiple_of(self.analysis_hop) {
             self.analyze();
         }
-        self.ratio += (self.target_ratio - self.ratio) * self.retune_alpha;
+        let held = (self.sustain_samples as f32 / (0.35 * self.rate)).min(1.0);
+        let humanize = if self.params.hard_tune { 0.0 } else { self.params.humanize };
+        let alpha = if self.params.hard_tune {
+            1.0 - (-1000.0 / (2.0 * self.rate)).exp()
+        } else {
+            self.retune_alpha / (1.0 + 5.0 * humanize * held)
+        };
+        self.ratio += (self.target_ratio - self.ratio) * alpha;
         let target_voiced = if self.pitch_hz.is_some() { 1.0 } else { 0.0 };
         self.voiced += (target_voiced - self.voiced) * 0.001;
         self.phase = (self.phase + (1.0 - self.ratio) / DELAY_SPAN).rem_euclid(1.0);
@@ -172,7 +202,8 @@ impl VocalTune {
             let x = self.mono[lag_index(self.at, j * stride)];
             energy += x * x;
         }
-        if energy < 0.00001 * YIN_POINTS as f32 {
+        let floor = 0.00005 - 0.000048 * self.params.sensitivity;
+        if energy < floor * YIN_POINTS as f32 {
             self.unvoiced();
             return;
         }
@@ -198,13 +229,13 @@ impl VocalTune {
                 if score < best.1 {
                     best = (lag, score);
                 }
-                if score < 0.16 && first.is_none() {
+                if score < 0.10 + 0.16 * self.params.sensitivity && first.is_none() {
                     first = Some(lag);
                 }
             }
         }
         let mut lag = first.unwrap_or(best.0);
-        if lag < 2 || best.1 > 0.25 {
+        if lag < 2 || best.1 > 0.13 + 0.2 * self.params.sensitivity {
             self.unvoiced();
             return;
         }
@@ -226,7 +257,7 @@ impl VocalTune {
             return;
         }
         self.pitch_hz = Some(hz);
-        let midi = 69.0 + 12.0 * (hz / 440.0).log2();
+        let midi = 69.0 + 12.0 * (hz / self.params.reference_hz).log2();
         let next = nearest_note(midi, self.params.root, self.params.scale);
         let next = match (next, self.note) {
             (Some(n), Some(prev))
@@ -238,10 +269,22 @@ impl VocalTune {
             }
             (other, _) => other,
         };
+        if self.note == next {
+            self.sustain_samples = self.sustain_samples.saturating_add(self.analysis_hop);
+        } else {
+            self.sustain_samples = 0;
+        }
         self.note = next;
         self.target_ratio = next.map_or(1.0, |n| {
+            let cents = (n as f32 - midi) * 100.0;
+            let hard = self.params.hard_tune;
+            let cents = if !hard && cents.abs() < self.params.deadband_cents {
+                0.0
+            } else {
+                cents * if hard { 1.0 } else { self.params.correction }
+            };
             2.0f32
-                .powf(((n as f32 - midi) * self.params.correction) / 12.0)
+                .powf((cents + self.params.detune_cents) / 1200.0)
                 .clamp(0.85, 1.18)
         });
     }
@@ -249,6 +292,7 @@ impl VocalTune {
         self.pitch_hz = None;
         self.note = None;
         self.target_ratio = 1.0;
+        self.sustain_samples = 0;
     }
 }
 fn finite_clamp(v: f32, min: f32, max: f32, fallback: f32) -> f32 {
@@ -274,6 +318,8 @@ fn allowed(m: i32, root: u8, scale: Scale) -> bool {
         Scale::Chromatic => true,
         Scale::Major => matches!((m - root as i32).rem_euclid(12), 0 | 2 | 4 | 5 | 7 | 9 | 11),
         Scale::Minor => matches!((m - root as i32).rem_euclid(12), 0 | 2 | 3 | 5 | 7 | 8 | 10),
+        Scale::Pentatonic => matches!((m - root as i32).rem_euclid(12), 0 | 2 | 4 | 7 | 9),
+        Scale::Blues => matches!((m - root as i32).rem_euclid(12), 0 | 3 | 5 | 6 | 7 | 10),
     }
 }
 pub fn nearest_note(midi: f32, root: u8, scale: Scale) -> Option<i32> {

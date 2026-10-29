@@ -65,6 +65,8 @@ enum Kind {
     /// Pitcher (25) and Pitcher 2 (45): the trackers' pitch and target.
     Pitcher,
     Pitcher2,
+    /// VocalTune: detected Hz, MIDI target, current correction ratio.
+    VocalTune,
     /// Analyzer (26): every view's data ([`analyzer`]).
     Analyzer(Box<Analyzer>),
 }
@@ -89,6 +91,7 @@ impl Probe {
             24 => (Kind::Tuner(Box::new(Detector::new(sample_rate))), 2),
             25 => (Kind::Pitcher, 2),
             45 => (Kind::Pitcher2, 2),
+            53 => (Kind::VocalTune, 3),
             26 => (
                 Kind::Analyzer(Box::new(Analyzer::new(sample_rate))),
                 analyzer::LEN,
@@ -135,6 +138,7 @@ impl Probe {
             Kind::TapeStop(theta) => *theta = 0.0,
             Kind::Tuner(detector) => detector.reset(),
             Kind::Pitcher | Kind::Pitcher2 => self.slab[1] = -1.0,
+            Kind::VocalTune => self.slab[1] = -1.0,
             Kind::Analyzer(analyzer) => analyzer.reset(&mut self.slab),
             Kind::None | Kind::Tremolo | Kind::Waveshaper => {}
         }
@@ -210,6 +214,11 @@ impl Probe {
             (Kind::Pitcher2, Processor::Pitcher2(state)) => {
                 slab[0] = state.tracked_frequency();
                 slab[1] = state.target_frequency();
+            }
+            (Kind::VocalTune, Processor::VocalTune(state)) => {
+                slab[0] = state.detected_hz().unwrap_or(0.0);
+                slab[1] = state.target_midi().map_or(-1.0, |n| n as f32);
+                slab[2] = state.ratio();
             }
             _ => {}
         }
@@ -657,6 +666,13 @@ pub fn pitcher(slab: &[f32]) -> Option<(f32, Option<usize>)> {
 }
 
 /// Pitcher 2: the detected and target pitches, Hz (0: none).
+pub fn vocal_tune(slab: &[f32]) -> Option<(f32, Option<i32>, f32)> {
+    match slab {
+        &[hz, midi, ratio] => Some((hz, (midi >= 0.0).then(|| midi as i32), ratio)),
+        _ => None,
+    }
+}
+
 pub fn pitcher2(slab: &[f32]) -> Option<(f32, f32)> {
     match slab {
         &[hz, target] => Some((hz, target)),
