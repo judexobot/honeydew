@@ -57,6 +57,9 @@ impl HoneydewApp {
         if let Some((channel, route)) = self.slots.rack.route.take()
             && let Some(channel) = self.song.channels.get(channel)
         {
+            #[cfg(target_os = "android")]
+            crate::android::microphone::retry();
+            self.input_failed = false;
             self.routing.set(&self.song, channel, route);
             if let Some(storage) = self.storage.as_deref_mut() {
                 self.routing.save(storage);

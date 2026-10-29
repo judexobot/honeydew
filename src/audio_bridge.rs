@@ -270,6 +270,24 @@ impl SongAudioBridge {
         start_beat: f64,
         end_beat: f64,
     ) -> Result<Vec<InputNoteEvent>, SongAudioError> {
+        Self::note_events_filtered(song, channel_index, start_beat, end_beat, None)
+    }
+    pub(crate) fn note_events_for_midi(
+        song: &Song,
+        channel: usize,
+        start: f64,
+        end: f64,
+        midi: Option<u8>,
+    ) -> Result<Vec<InputNoteEvent>, SongAudioError> {
+        Self::note_events_filtered(song, channel, start, end, Some(midi))
+    }
+    fn note_events_filtered(
+        song: &Song,
+        channel_index: usize,
+        start_beat: f64,
+        end_beat: f64,
+        route: Option<Option<u8>>,
+    ) -> Result<Vec<InputNoteEvent>, SongAudioError> {
         if !start_beat.is_finite()
             || !end_beat.is_finite()
             || start_beat < 0.0
@@ -284,7 +302,9 @@ impl SongAudioBridge {
             .ok_or(SongAudioError::InvalidChannel)?;
         let mut events = Vec::new();
         for lane in &channel.lanes {
-            if lane.kind != LaneKind::Notes {
+            if lane.kind != LaneKind::Notes
+                || route.is_some_and(|target| lane.midi_channel() != target)
+            {
                 continue;
             }
             for clip in playing_clips(lane) {

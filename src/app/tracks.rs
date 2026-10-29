@@ -263,6 +263,12 @@ impl HoneydewApp {
             return;
         };
         match op {
+            TrackOp::GameBoyChannel(target) => {
+                if let Some(lane) = ch.lanes.get_mut(lane) {
+                    lane.set_midi_channel(target);
+                    self.song_edited(SongEdit::Final, tick);
+                }
+            }
             TrackOp::ToggleZip => {
                 ch.zipped = !ch.zipped;
                 // A clip selected on a track that hides goes with it, as do such clips of the group.
@@ -820,6 +826,12 @@ impl HoneydewApp {
         let track = |c: usize, l: usize| rk.track(c, l);
         self.auto_record.rekey(&self.channel_ids, &track);
         (self.note_record).rekey(&self.channel_ids, &|c| rk.channel(c), &track);
+        for record in &mut self.midi_records {
+            record.rekey(&self.channel_ids, &|c| rk.channel(c), &track);
+        }
+        self.midi
+            .gated_mapped
+            .retain_mut(|g| rk.channel(g.1).map(|c| g.1 = c).is_some());
         self.channel_ids = ids;
         // A header drag's order names the channels as they were: it ends.
         self.main_screen.cancel_hold();

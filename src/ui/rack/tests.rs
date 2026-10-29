@@ -54,7 +54,7 @@ const HEADINGS: [&str; 40] = [
     r#"### 2.37 Randomizer (ID 49, note effect) — UIHeight 6 U"#,
     r#"### 2.38 Scale (ID 50, note effect) — UIHeight 6.5 U"#,
     r#"### 2.39 Arpeggiator (ID 51, note effect) — UIHeight 10 U"#,
-    r#"### 2.40 VocalTune (ID 53, effect) — UIHeight 9 U"#,
+    r#"### 2.40 VocalTune (ID 53, effect) — UIHeight 12 U"#,
 ];
 
 /// The text between `from` and the next `to`.
@@ -93,7 +93,7 @@ fn instruments_take_the_card_heights_of_their_table() {
         (33, "Slicer", 8.5),
         (39, "3x Osc", 10.0),
         (52, "SoundFont Player", 8.5),
-        (54, "Game Boy APU", 9.0),
+        (54, "Game Boy APU", 13.0),
     ];
     for (id, name, height) in table {
         assert_eq!(ui_height(id), Some(height), "{name}");

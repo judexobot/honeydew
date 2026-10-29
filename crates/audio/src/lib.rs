@@ -16,6 +16,7 @@ pub mod gm_waveshapes;
 pub mod gmsynth;
 pub mod input;
 pub mod instrument;
+pub mod latency;
 pub mod lemon;
 pub mod metronome;
 pub mod minisynth;
@@ -100,7 +101,7 @@ pub fn effect_info(id: u16) -> Option<EffectInfo> {
         44 => ("Spreader", 5),
         45 => ("Pitcher 2", 27),
         46 => ("Tremolo", 12),
-        53 => ("VocalTune", 25),
+        53 => ("VocalTune", vocal_tune::NUM_PARAMS),
         lemon::REVERB => ("Lemon Reverb", lemon::REVERB_MID_SIDE + 1),
         lemon::LIMITER => ("Lemon Limiter", lemon::LIMITER_SAFETY + 1),
         _ => return None,
@@ -463,10 +464,7 @@ impl AudioEffect {
                 Processor::Tremolo(TremoloState::default()),
             ),
             53 => {
-                let params = vec![
-                    1.0, 0.0, 0.0, 1.0, 0.25, 1.0, 0.2, 0.5, 0.1, 0.5, 0.0, 0.5, 1.0, 1.0, 1.0,
-                    1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.75,
-                ];
+                let params = vocal_tune::DEFAULTS.to_vec();
                 let rate = sample_rate as u32;
                 if (rate as f32 - sample_rate).abs() > 0.001 {
                     return Err(EffectError::InvalidSampleRate);
@@ -766,7 +764,15 @@ impl AudioEffect {
         let mut peak = MeterSnapshot::default();
         for (l, r) in left.iter_mut().zip(right.iter_mut()) {
             let input = (*l, *r);
-            if runs {
+            if let Processor::VocalTune(state) = &mut self.processor {
+                let wet = state.process_frame(*l, *r);
+                let dry = state.dry_frame();
+                (*l, *r) = if self.params[0] >= 0.5 {
+                    self.common.frame(dry, wet)
+                } else {
+                    wet
+                };
+            } else if runs {
                 let wet = self.processor.process_frame(*l, *r);
                 (*l, *r) = self.common.frame((*l, *r), wet);
             }
@@ -936,6 +942,15 @@ impl Processor {
                         }
                     }),
                     protect_sibilants: params[24],
+                    formant_preserve: params[25] >= 0.5,
+                    formant_shift: -12.0 + 24.0 * params[26],
+                    vibrato: params[27],
+                    transition_ms: 100.0 * params[28],
+                    flex_cents: 100.0 * params[29],
+                    input_range: (params[30] * 3.0).round() as u8,
+                    output_db: -24.0 + 48.0 * params[31],
+                    studio: params[32] >= 0.5,
+                    enabled: params[0] >= 0.5,
                 });
             }
             Self::Comb(state) => state.refresh(params, sample_rate),

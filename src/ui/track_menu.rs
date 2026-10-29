@@ -8,6 +8,7 @@ use crate::ui::popup::PopupItem;
 /// The menu's items.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TrackOp {
+    GameBoyChannel(Option<u8>),
     /// `Show Tracks` / `Hide tracks`.
     ToggleZip,
     ChannelSettings,
@@ -103,9 +104,27 @@ pub fn track_menu(song: &Song, channel: usize, lane: usize) -> Vec<PopupItem<Tra
                 ..PopupItem::new(op, col, row, label)
             })
     };
-    column(0, channel_items.into_iter().flatten().collect())
+    let mut items: Vec<_> = column(0, channel_items.into_iter().flatten().collect())
         .chain(column(1, kind_items.to_vec()))
-        .collect()
+        .collect();
+    if this.kind == LaneKind::Notes && ch.rack.modules.iter().any(|m| m.type_id == 54) {
+        for (row, (target, label)) in [
+            (None, "APU: Keyboard"),
+            (Some(0), "APU: PULSE 1"),
+            (Some(1), "APU: PULSE 2"),
+            (Some(2), "APU: WAVE"),
+            (Some(3), "APU: NOISE"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            items.push(PopupItem {
+                disabled: this.midi_channel() == target,
+                ..PopupItem::new(GameBoyChannel(target), 2, row, label)
+            });
+        }
+    }
+    items
 }
 
 #[cfg(test)]

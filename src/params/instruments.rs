@@ -1037,28 +1037,283 @@ const SOUNDFONT_PLAYER: &[P] = &[
 
 // Hardware-clocked DMG APU instrument (p0..21).
 const GAMEBOY_APU: &[P] = &[
-    P::ENABLE, // 0
-    P::cont("CH1 Level", 0.87, Display::linear(0.0, 15.0, 0, "")), // 1
-    P::menu("CH1 Duty", 2.0 / 3.0, &["12.5%", "25%", "50%", "75%"]), // 2
+    P::ENABLE,                                                             // 0
+    P::cont("CH1 Level", 0.87, Display::linear(0.0, 15.0, 0, "")),         // 1
+    P::menu("CH1 Duty", 2.0 / 3.0, &["12.5%", "25%", "50%", "75%"]),       // 2
     P::menu("Sweep Pace", 0.0, &["0", "1", "2", "3", "4", "5", "6", "7"]), // 3
-    P::menu("Sweep Shift", 0.0, &["0", "1", "2", "3", "4", "5", "6", "7"]), // 4
-    P::toggle("Sweep Down", 0.0), // 5
-    P::cont("CH2 Level", 0.6, Display::linear(0.0, 15.0, 0, "")), // 6
-    P::menu("CH2 Duty", 1.0 / 3.0, &["12.5%", "25%", "50%", "75%"]), // 7
-    P::menu("Wave Level", 1.0 / 3.0, &["Off", "100%", "50%", "25%"]), // 8
-    P::menu("Waveform", 0.0, &["Triangle", "Saw", "Square", "Sine"]), // 9
-    P::cont("Noise Level", 0.0, Display::linear(0.0, 15.0, 0, "")), // 10
-    P::toggle("Noise 7-bit", 0.0), // 11
-    P::menu("Noise Divisor", 0.0, &["0", "1", "2", "3", "4", "5", "6", "7"]), // 12
-    P::menu("Noise Shift", 0.0, &["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"]), // 13
-    P::menu("Envelope Pace", 0.0, &["0", "1", "2", "3", "4", "5", "6", "7"]), // 14
-    P::menu("Master Volume", 1.0, &["0", "1", "2", "3", "4", "5", "6", "7"]), // 15
-    P::menu("Stereo", 0.0, &["Mono", "Split", "Wide"]), // 16
-    P::cont("Output Gain", 0.75, Display::linear(0.0, 100.0, 0, "%")), // 17
-    P::toggle("CH1 On", 1.0), // 18
-    P::toggle("CH2 On", 1.0), // 19
-    P::toggle("CH3 On", 1.0), // 20
-    P::toggle("CH4 On", 0.0), // 21
+    P::menu(
+        "Sweep Shift",
+        0.0,
+        &["0", "1", "2", "3", "4", "5", "6", "7"],
+    ), // 4
+    P::toggle("Sweep Down", 0.0),                                          // 5
+    P::cont("CH2 Level", 0.6, Display::linear(0.0, 15.0, 0, "")),          // 6
+    P::menu("CH2 Duty", 1.0 / 3.0, &["12.5%", "25%", "50%", "75%"]),       // 7
+    P::menu("Wave Level", 1.0 / 3.0, &["Off", "100%", "50%", "25%"]),      // 8
+    P::menu("Waveform", 0.0, &["Triangle", "Saw", "Square", "Sine"]),      // 9
+    P::cont("Noise Level", 0.0, Display::linear(0.0, 15.0, 0, "")),        // 10
+    P::toggle("Noise 7-bit", 0.0),                                         // 11
+    P::menu(
+        "Noise Divisor",
+        0.0,
+        &["0", "1", "2", "3", "4", "5", "6", "7"],
+    ), // 12
+    P::menu(
+        "Noise Shift",
+        0.0,
+        &[
+            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13",
+        ],
+    ), // 13
+    P::menu(
+        "Envelope Pace",
+        0.0,
+        &["0", "1", "2", "3", "4", "5", "6", "7"],
+    ), // 14
+    P::menu(
+        "Master Volume",
+        1.0,
+        &["0", "1", "2", "3", "4", "5", "6", "7"],
+    ), // 15
+    P::menu("Stereo", 0.0, &["Mono", "Split", "Wide"]),                    // 16
+    P::cont("Output Gain", 0.75, Display::linear(0.0, 100.0, 0, "%")),     // 17
+    P::toggle("CH1 On", 1.0),                                              // 18
+    P::toggle("CH2 On", 1.0),                                              // 19
+    P::toggle("CH3 On", 1.0),                                              // 20
+    P::toggle("CH4 On", 0.0),                                              // 21
+    P::menu("Mode", 0.0, &["Authentic", "Extended"]),
+    P::menu("Note Routing", 1.0, &["Layered", "Selected", "MIDI 1-4"]),
+    P::menu(
+        "Keyboard Channel",
+        0.0,
+        &["PULSE 1", "PULSE 2", "WAVE", "NOISE"],
+    ),
+    P::cont(
+        "Bend Range",
+        2.0 / 24.0,
+        Display::linear(0.0, 24.0, 0, " st"),
+    ),
+    P::toggle("Custom Wave", 0.0),
+    P::cont(
+        "Wave 01",
+        honeydew_audio::gameboy_instrument::DEFAULTS[27],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 02",
+        honeydew_audio::gameboy_instrument::DEFAULTS[28],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 03",
+        honeydew_audio::gameboy_instrument::DEFAULTS[29],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 04",
+        honeydew_audio::gameboy_instrument::DEFAULTS[30],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 05",
+        honeydew_audio::gameboy_instrument::DEFAULTS[31],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 06",
+        honeydew_audio::gameboy_instrument::DEFAULTS[32],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 07",
+        honeydew_audio::gameboy_instrument::DEFAULTS[33],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 08",
+        honeydew_audio::gameboy_instrument::DEFAULTS[34],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 09",
+        honeydew_audio::gameboy_instrument::DEFAULTS[35],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 10",
+        honeydew_audio::gameboy_instrument::DEFAULTS[36],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 11",
+        honeydew_audio::gameboy_instrument::DEFAULTS[37],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 12",
+        honeydew_audio::gameboy_instrument::DEFAULTS[38],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 13",
+        honeydew_audio::gameboy_instrument::DEFAULTS[39],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 14",
+        honeydew_audio::gameboy_instrument::DEFAULTS[40],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 15",
+        honeydew_audio::gameboy_instrument::DEFAULTS[41],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 16",
+        honeydew_audio::gameboy_instrument::DEFAULTS[42],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 17",
+        honeydew_audio::gameboy_instrument::DEFAULTS[43],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 18",
+        honeydew_audio::gameboy_instrument::DEFAULTS[44],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 19",
+        honeydew_audio::gameboy_instrument::DEFAULTS[45],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 20",
+        honeydew_audio::gameboy_instrument::DEFAULTS[46],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 21",
+        honeydew_audio::gameboy_instrument::DEFAULTS[47],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 22",
+        honeydew_audio::gameboy_instrument::DEFAULTS[48],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 23",
+        honeydew_audio::gameboy_instrument::DEFAULTS[49],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 24",
+        honeydew_audio::gameboy_instrument::DEFAULTS[50],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 25",
+        honeydew_audio::gameboy_instrument::DEFAULTS[51],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 26",
+        honeydew_audio::gameboy_instrument::DEFAULTS[52],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 27",
+        honeydew_audio::gameboy_instrument::DEFAULTS[53],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 28",
+        honeydew_audio::gameboy_instrument::DEFAULTS[54],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 29",
+        honeydew_audio::gameboy_instrument::DEFAULTS[55],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 30",
+        honeydew_audio::gameboy_instrument::DEFAULTS[56],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 31",
+        honeydew_audio::gameboy_instrument::DEFAULTS[57],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "Wave 32",
+        honeydew_audio::gameboy_instrument::DEFAULTS[58],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::toggle("CH1 Envelope Rise", 0.0),
+    P::menu(
+        "CH1 Envelope Pace",
+        0.0,
+        &["Global", "0", "1", "2", "3", "4", "5", "6", "7"],
+    ),
+    P::toggle("CH1 Length Enable", 0.0),
+    P::cont("CH1 Length", 0.0, Display::linear(0.0, 63.0, 0, "")),
+    P::cont("CH1 Transpose", 0.5, Display::linear(-24.0, 24.0, 0, " st")),
+    P::toggle("CH2 Envelope Rise", 0.0),
+    P::menu(
+        "CH2 Envelope Pace",
+        0.0,
+        &["Global", "0", "1", "2", "3", "4", "5", "6", "7"],
+    ),
+    P::toggle("CH2 Length Enable", 0.0),
+    P::cont("CH2 Length", 0.0, Display::linear(0.0, 63.0, 0, "")),
+    P::cont("CH2 Transpose", 0.5, Display::linear(-24.0, 24.0, 0, " st")),
+    P::toggle("CH3 Length Enable", 0.0),
+    P::cont("CH3 Length", 0.0, Display::linear(0.0, 255.0, 0, "")),
+    P::cont("CH3 Transpose", 0.5, Display::linear(-24.0, 24.0, 0, " st")),
+    P::toggle("CH4 Envelope Rise", 0.0),
+    P::menu(
+        "CH4 Envelope Pace",
+        0.0,
+        &["Global", "0", "1", "2", "3", "4", "5", "6", "7"],
+    ),
+    P::toggle("CH4 Length Enable", 0.0),
+    P::cont("CH4 Length", 0.0, Display::linear(0.0, 63.0, 0, "")),
+    P::menu("Noise Clock", 0.0, &["Normal", "Shift 14", "Shift 15"]),
+    P::toggle("Custom Routing", 0.0),
+    P::menu("CH1 Routing", 1.0, &["Off", "Left", "Right", "Both"]),
+    P::menu("CH2 Routing", 1.0, &["Off", "Left", "Right", "Both"]),
+    P::menu("CH3 Routing", 1.0, &["Off", "Left", "Right", "Both"]),
+    P::menu("CH4 Routing", 1.0, &["Off", "Left", "Right", "Both"]),
+    P::cont(
+        "Extended Release",
+        0.02,
+        Display::linear(2.0, 502.0, 0, " ms"),
+    ),
+    P::cont(
+        "CH1 Extended Pan",
+        0.5,
+        Display::linear(-100.0, 100.0, 0, "%"),
+    ),
+    P::cont(
+        "CH2 Extended Pan",
+        0.5,
+        Display::linear(-100.0, 100.0, 0, "%"),
+    ),
+    P::cont(
+        "CH3 Extended Pan",
+        0.5,
+        Display::linear(-100.0, 100.0, 0, "%"),
+    ),
+    P::cont(
+        "CH4 Extended Pan",
+        0.5,
+        Display::linear(-100.0, 100.0, 0, "%"),
+    ),
 ];
 
 pub static MODULES: &[ModuleSpec] = &[
@@ -1112,5 +1367,11 @@ pub static MODULES: &[ModuleSpec] = &[
         SOUNDFONT_PLAYER,
         &[],
     ),
-    ModuleSpec::instrument(54, "Game Boy APU", "Game Boy APU", GAMEBOY_APU, &["PULSE 1", "PULSE 2", "WAVE", "NOISE", "MIX"]),
+    ModuleSpec::instrument(
+        54,
+        "Game Boy APU",
+        "Game Boy APU",
+        GAMEBOY_APU,
+        &["PULSE 1", "PULSE 2", "WAVE", "NOISE", "MIX"],
+    ),
 ];

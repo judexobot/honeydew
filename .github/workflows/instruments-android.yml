@@ -1,0 +1,98 @@
+name: VocalTune + Game Boy · Android ARM64
+on:
+  push:
+    branches: [integration/vocaltune-gameboy-android]
+  workflow_dispatch:
+concurrency:
+  group: honeydew-ci-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: 2
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
+      - name: Format integration sources (Rust 2024)
+        run: |
+          git fetch --depth=1 origin b74de1972de3d9592b6f73ea0e376f4431602067
+          git diff --name-only b74de1972de3d9592b6f73ea0e376f4431602067 HEAD -- '*.rs' | xargs -r rustfmt --check --edition 2024 --config skip_children=true
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Engine, UI, persistence and routing regressions
+        run: |
+          cargo test --workspace --lib --locked
+          cargo test --locked --test integration_instruments
+      - name: Spectral DSP and callback allocation checks
+        run: |
+          cargo test -p honeydew-audio --locked --test vocal_tune --test vocal_tune_spectral
+          cargo test -p honeydew-audio --locked --test rt_alloc vocal_tune_and_gameboy_callbacks_allocate_nothing
+      - name: Web compatibility
+        run: cargo check --workspace --locked --target wasm32-unknown-unknown
+  arm-audio:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: arm-audio
+      - name: System libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libclang-dev
+      - name: Run DSP on a native ARM64 CPU
+        run: |
+          cargo test -p honeydew-audio --release --locked --lib gameboy
+          cargo test -p honeydew-audio --release --locked --test vocal_tune --test vocal_tune_spectral
+          cargo test -p honeydew-audio --release --locked --test rt_alloc vocal_tune_and_gameboy_callbacks_allocate_nothing
+          cargo run -p honeydew-audio --release --locked --example instruments_smoke -- target/instruments-audio-qa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Honeydew-Instruments-ARM64-audio-QA
+          path: target/instruments-audio-qa
+          if-no-files-found: error
+          retention-days: 7
+  android:
+    needs: [validate, arm-audio]
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[android]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: integrated-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+      - name: SDK, NDK and cargo-ndk
+        run: |
+          sudo apt-get update && sudo apt-get install -y libclang-dev
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.0.13004108'
+          cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Build libhoneydew.so and signed debug APK
+        run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.0.13004108" tools/android-dist.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Honeydew-VocalTune-GameBoy-Android-arm64-debug
+          path: target/honeydew-android-*-arm64-debug.apk
+          if-no-files-found: error
+          retention-days: 7

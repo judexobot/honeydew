@@ -782,3 +782,26 @@ fn an_export_does_not_wrap_at_the_song_end() {
     engine.render(&mut vec![0.0; frames(6.0) * 2], 2);
     assert_eq!(engine.transport_tick(), 6 * u64::from(PPQ));
 }
+
+#[test]
+fn vocaltune_parallel_latency_is_removed_from_exports_in_both_profiles() {
+    let original = note_song(0, 2.0);
+    let baseline = render(&original, spec(RenderRange::Full, Remainder::Cut)).unwrap();
+    for studio in [false, true] {
+        let mut song = original.clone();
+        let id = song.channels[1].rack.add(53);
+        let vocal = song.channels[1].rack.get_mut(id).unwrap();
+        vocal.params[0] = 0.0;
+        vocal.params[32] = f32::from(studio);
+        song.add_channel(ChannelKind::Synth(SynthKind::MiniSynth));
+        song.channels[2].lanes = original.channels[1].lanes.clone();
+        let audio = render(&song, spec(RenderRange::Full, Remainder::Cut)).unwrap();
+        assert_eq!(audio[0].len(), baseline[0].len());
+        for (actual, expected) in audio.iter().flatten().zip(baseline.iter().flatten()) {
+            assert!(
+                (actual - 2.0 * expected).abs() < 1e-5,
+                "studio={studio}: {actual} != 2 * {expected}"
+            );
+        }
+    }
+}

@@ -1,5 +1,7 @@
 package dev.daijro.honeydew;
 
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.app.AlertDialog;
 import android.app.NativeActivity;
 import android.content.Intent;
@@ -26,6 +28,21 @@ import java.io.OutputStream;
 public final class HoneydewActivity extends NativeActivity {
     static { System.loadLibrary("honeydew"); }
 
+    private HoneydewMidiBridge midiBridge;
+    private static native void onRecordingPermission(boolean granted);
+    private static native void onAudioActive(boolean active);
+    @Override protected void onPause() { onAudioActive(false); super.onPause(); }
+    @Override protected void onResume() { super.onResume(); onAudioActive(true); }
+    private static final int RECORD_PERMISSION = 2;
+    public boolean hasRecordingPermission() { return checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED; }
+    public void requestRecordingPermission() { runOnUiThread(() -> requestPermissions(new String[] {Manifest.permission.RECORD_AUDIO}, RECORD_PERMISSION)); }
+    @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(request, permissions, results);
+        if (request == RECORD_PERMISSION) onRecordingPermission(results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED);
+    }
+    public String[] midiPorts() { return midiBridge == null ? new String[0] : midiBridge.list(); }
+    public void openMidiPorts(String choice) { if (midiBridge != null) midiBridge.open(choice); }
+    public void closeMidiPorts() { if (midiBridge != null) midiBridge.close(); }
     private AlertDialog editorDialog;
     private long activeRequestId;
 
@@ -41,6 +58,7 @@ public final class HoneydewActivity extends NativeActivity {
         // Publish physical density before NativeActivity starts the Rust app thread.
         onDisplayDpi(getResources().getDisplayMetrics().xdpi);
         super.onCreate(state);
+        midiBridge = new HoneydewMidiBridge(this);
         hideSystemBars();
     }
 
@@ -198,6 +216,7 @@ public final class HoneydewActivity extends NativeActivity {
 
     @Override
     protected void onDestroy() {
+        closeMidiPorts();
         if (editorDialog != null) editorDialog.dismiss();
         super.onDestroy();
         onDisplayDpi(0);

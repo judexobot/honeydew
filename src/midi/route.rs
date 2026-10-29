@@ -20,6 +20,19 @@ const VELOCITY_STEP: f32 = 0.007874;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Out {
+    MidiNote {
+        channel: usize,
+        midi: u8,
+        key: u8,
+        on: bool,
+        velocity: f32,
+    },
+    MidiControl {
+        channel: usize,
+        midi: u8,
+        index: i32,
+        value: f32,
+    },
     /// `velocity` = MIDI velocity · [`VELOCITY_STEP`] at a note-on, / 127 at a note-off.
     Note {
         channel: usize,
@@ -49,6 +62,7 @@ pub struct Router {
     pub learn: Learn,
     /// Sounding keys → the channel their note-on went to.
     held: BTreeMap<u8, usize>,
+    midi_held: BTreeMap<(u8, u8), usize>,
 }
 
 impl Router {
@@ -56,6 +70,17 @@ impl Router {
     /// All 16 MIDI channels are merged (omni).
     pub fn route(&mut self, msg: MidiMsg, channel: usize, links: &[(usize, CcLink)]) -> Vec<Out> {
         let mut out = Vec::new();
+        if let MidiMsg::NoteOff { ch, key, vel } = msg
+            && let Some(old) = self.midi_held.remove(&(ch, key))
+        {
+            return vec![Out::MidiNote {
+                channel: old,
+                midi: ch,
+                key,
+                on: false,
+                velocity: f32::from(vel) / 127.0,
+            }];
+        }
         match msg {
             MidiMsg::NoteOn { key, vel, .. } => {
                 // The key sounds on one channel at a time, so no note is ever stranded.
@@ -132,29 +157,134 @@ impl Router {
         out
     }
 
+    /// Preserve channel identity for a multitimbral instrument; other instruments keep the omni route.
+    pub fn route_midi(
+        &mut self,
+        msg: MidiMsg,
+        channel: usize,
+        links: &[(usize, CcLink)],
+    ) -> Vec<Out> {
+        let mut out = Vec::new();
+        match msg {
+            MidiMsg::NoteOn { ch, key, vel } => {
+                if let Some(old) = self.held.remove(&key) {
+                    out.push(Out::Note {
+                        channel: old,
+                        key,
+                        on: false,
+                        velocity: 0.0,
+                    });
+                }
+                if let Some(old) = self.midi_held.insert((ch, key), channel)
+                    && old != channel
+                {
+                    out.push(Out::MidiNote {
+                        channel: old,
+                        midi: ch,
+                        key,
+                        on: false,
+                        velocity: 0.0,
+                    });
+                }
+                out.push(Out::MidiNote {
+                    channel,
+                    midi: ch,
+                    key,
+                    on: true,
+                    velocity: f32::from(vel) * VELOCITY_STEP,
+                });
+                if self.learn == Learn::Note {
+                    self.learn = Learn::Off;
+                    out.push(Out::LearnedNote(key));
+                }
+            }
+            MidiMsg::NoteOff { ch, key, vel } => {
+                if self.held.contains_key(&key) {
+                    return self.route(msg, channel, links);
+                }
+                let channel = self.midi_held.remove(&(ch, key)).unwrap_or(channel);
+                out.push(Out::MidiNote {
+                    channel,
+                    midi: ch,
+                    key,
+                    on: false,
+                    velocity: f32::from(vel) / 127.0,
+                });
+            }
+            MidiMsg::Cc { ch, .. }
+            | MidiMsg::PitchBend { ch, .. }
+            | MidiMsg::ChannelPressure { ch, .. } => {
+                out = self
+                    .route(msg, channel, links)
+                    .into_iter()
+                    .map(|o| match o {
+                        Out::ChannelParam {
+                            channel,
+                            index,
+                            value,
+                        } => Out::MidiControl {
+                            channel,
+                            midi: ch,
+                            index,
+                            value,
+                        },
+                        other => other,
+                    })
+                    .collect();
+            }
+            _ => out = self.route(msg, channel, links),
+        }
+        out
+    }
+
+    pub fn held_midi(&self) -> impl Iterator<Item = (u8, usize)> + '_ {
+        self.midi_held
+            .iter()
+            .map(|(&(_, key), &channel)| (key, channel))
+    }
     /// The keys held, each with the channel it sounds on.
     pub fn held(&self) -> impl Iterator<Item = (u8, usize)> + '_ {
-        self.held.iter().map(|(&key, &channel)| (key, channel))
+        self.held
+            .iter()
+            .map(|(&key, &channel)| (key, channel))
+            .chain(
+                self.midi_held
+                    .iter()
+                    .map(|(&(_, key), &channel)| (key, channel)),
+            )
     }
 
     /// The channels moved: each held key follows its channel by `channel`. A key whose channel went holds the master,
     /// which plays nothing, so its note-off goes nowhere.
     pub fn rekey(&mut self, channel: &dyn Fn(usize) -> Option<usize>) {
-        for c in self.held.values_mut() {
+        for c in self.held.values_mut().chain(self.midi_held.values_mut()) {
             *c = channel(*c).unwrap_or(0);
         }
     }
 
     /// Note-offs for every held key, each on its own channel.
     pub fn release_all(&mut self) -> Vec<Out> {
-        std::mem::take(&mut self.held)
+        let mut midi: Vec<_> = std::mem::take(&mut self.midi_held)
             .into_iter()
-            .map(|(key, channel)| Out::Note {
+            .map(|((midi, key), channel)| Out::MidiNote {
                 channel,
+                midi,
                 key,
                 on: false,
                 velocity: 0.0,
             })
-            .collect()
+            .collect();
+        midi.extend(
+            std::mem::take(&mut self.held)
+                .into_iter()
+                .map(|(key, channel)| Out::Note {
+                    channel,
+                    key,
+                    on: false,
+                    velocity: 0.0,
+                })
+                .collect::<Vec<_>>(),
+        );
+        midi
     }
 }

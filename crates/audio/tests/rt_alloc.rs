@@ -710,3 +710,48 @@ fn a_streaming_pad_plays_without_allocating_while_its_frames_arrive() {
     assert_eq!(calls, 0);
     assert!(heard > 0.1, "it played");
 }
+
+#[test]
+fn vocal_tune_and_gameboy_callbacks_allocate_nothing() {
+    use honeydew_audio::gameboy_instrument::{GameBoyInstrument, MODE, NUM_PARAMS};
+    use honeydew_audio::instrument::Instrument;
+    let mut vocal = AudioEffect::new(53, SAMPLE_RATE).unwrap();
+    let mut gameboy = GameBoyInstrument::new(SAMPLE_RATE);
+    let mut left = [0.0; 256];
+    let mut right = [0.0; 256];
+    let context = ProcessContext {
+        sample_rate: SAMPLE_RATE,
+        tempo_bpm: 120.0,
+        start_beat: 0.0,
+        playing: true,
+    };
+    let calls = allocator_calls(|| {
+        for block in 0..48 {
+            for (i, x) in left.iter_mut().enumerate() {
+                *x = 0.25
+                    * (std::f32::consts::TAU * 223.0 * (block * 256 + i) as f32 / SAMPLE_RATE)
+                        .sin();
+            }
+            right.copy_from_slice(&left);
+            vocal.set_parameter(32, f32::from(block >= 24)).unwrap();
+            vocal.process(&mut left, &mut right, context).unwrap();
+            gameboy.set_parameter(MODE, f32::from(block >= 24));
+            for p in 1..NUM_PARAMS {
+                if p != MODE {
+                    gameboy.set_parameter(p, (block % 7) as f32 / 6.0);
+                }
+            }
+            gameboy.note_on_midi((block % 4) as u8, 60 + (block % 12) as u8, 0.8, 0.5);
+            gameboy.set_midi_controller(0, 4, 0.6);
+            gameboy.process(&mut left, &mut right, context);
+            gameboy.note_off_midi((block % 4) as u8, 60 + (block % 12) as u8);
+        }
+        gameboy.all_notes_off();
+        gameboy.reset();
+        vocal.reset();
+    });
+    assert_eq!(
+        calls, 0,
+        "new DSP paths allocated or freed inside the callback"
+    );
+}

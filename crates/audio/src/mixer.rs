@@ -132,6 +132,21 @@ impl Mixer {
         })
     }
 
+    pub fn same_routes(&self, other: &Self) -> bool {
+        self.channels.len() == other.channels.len()
+            && self.channels.iter().zip(&other.channels).all(|(a, b)| {
+                a.sends
+                    .iter()
+                    .map(|s| s.target)
+                    .eq(b.sends.iter().map(|s| s.target))
+            })
+    }
+    pub(crate) fn order(&self) -> &[usize] {
+        &self.order
+    }
+    pub(crate) fn sends(&self, channel: usize) -> &[SendMix] {
+        &self.channels[channel].sends
+    }
     /// Routing levels; every channel in one stage has received all its inputs.
     pub fn stages(&self) -> &[Vec<usize>] {
         &self.stages
@@ -213,6 +228,49 @@ impl Mixer {
     pub fn route_stage<B: MixBuffer>(&self, buffers: &mut [B], stage: usize) {
         for &index in &self.stages[stage] {
             self.route_channel(buffers, index);
+        }
+    }
+
+    /// Stateful alignment is owned separately, so existing immutable mixer callers are unchanged.
+    pub fn route_stage_compensated<B: MixBuffer>(
+        &self,
+        buffers: &mut [B],
+        stage: usize,
+        comp: &mut crate::latency::DelayCompensation,
+    ) {
+        if !comp.enabled() {
+            self.route_stage(buffers, stage);
+            return;
+        }
+        for &index in &self.stages[stage] {
+            let channel = &self.channels[index];
+            let gain = level_gain(channel.level);
+            let (l, r) = buffers[index].stereo();
+            for (l, r) in l.iter_mut().zip(r) {
+                *l *= gain * (2.0 - 2.0 * channel.pan).min(1.0);
+                *r *= gain * (2.0 * channel.pan).min(1.0);
+            }
+            for (edge, send) in channel.sends.iter().enumerate() {
+                let gain = if send.enabled > 0.5 {
+                    level_gain(send.level)
+                } else {
+                    0.0
+                };
+                let (source, target) = if index < send.target {
+                    let (a, b) = buffers.split_at_mut(send.target);
+                    (&mut a[index], &mut b[0])
+                } else {
+                    let (a, b) = buffers.split_at_mut(index);
+                    (&mut b[0], &mut a[send.target])
+                };
+                let (sl, sr) = source.stereo();
+                let (tl, tr) = target.stereo();
+                for (((tl, tr), l), r) in tl.iter_mut().zip(tr).zip(sl).zip(sr) {
+                    let out = comp.send(index, edge, [*l * gain, *r * gain]);
+                    *tl += out[0];
+                    *tr += out[1];
+                }
+            }
         }
     }
 

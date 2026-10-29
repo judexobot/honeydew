@@ -17,6 +17,7 @@ const PLAIN_CAPACITY: usize = 256;
 /// A channel's live keys: its note effects in real time, and per instrument the note effects above it.
 pub(super) struct Live {
     chain: LiveNoteChain,
+    midi: Vec<LiveNoteChain>,
     stages: Vec<usize>,
     /// The channel's current lane is a notes lane; until the app says, its first lane.
     pub notes_lane: bool,
@@ -52,17 +53,33 @@ pub(super) fn build(
     } else {
         CAPACITY
     };
-    let chain = LiveNoteChain::new(
-        effects,
-        f64::from(song.time_sig.bar_beats()),
-        f64::from(sample_rate),
-        f64::from(tempo_bpm),
-        capacity,
-    )
-    .map_err(EngineError::Notes)?;
+    let make_chain = |effects| {
+        LiveNoteChain::new(
+            effects,
+            f64::from(song.time_sig.bar_beats()),
+            f64::from(sample_rate),
+            f64::from(tempo_bpm),
+            capacity,
+        )
+        .map_err(EngineError::Notes)
+    };
+    let midi = if song.channels[channel]
+        .rack
+        .modules
+        .iter()
+        .any(|m| m.type_id == 54)
+    {
+        (0..4)
+            .map(|_| make_chain(effects.clone()))
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        Vec::new()
+    };
+    let chain = make_chain(effects)?;
     let lanes = &song.channels[channel].lanes;
     Ok(Some(Live {
         chain,
+        midi,
         stages,
         notes_lane: lanes
             .first()
@@ -85,36 +102,42 @@ impl Live {
         now: u64,
     ) {
         let stages = &old.stages;
-        self.chain
-            .take_over(&mut old.chain, now, |route, level, notes_lane| {
-                // Its rows in `old`'s engine: an earlier edit's route, else its level there, as `send_live` routes.
-                let before = route.unwrap_or_else(|| {
-                    let pads = u128::from(!notes_lane || level == 0) << PADS;
-                    let reached = |&row: &usize| !notes_lane || stages[row] == level;
-                    (0..stages.len().min(PADS))
-                        .filter(reached)
-                        .fold(pads, |rows, row| rows | 1 << row)
-                });
-                let here = |row: usize| {
-                    let id = old_rows.get(row)?.0;
-                    rows.iter()
-                        .position(|(other, _)| *other == id)
-                        .filter(|&at| at < PADS)
-                };
-                let (mut moved, mut left) = (before & 1 << PADS, before & !(1 << PADS));
-                while left != 0 {
-                    let row = left.trailing_zeros() as usize;
-                    left &= left - 1;
-                    moved |= here(row).map_or(0, |at| 1 << at);
-                }
-                moved
+        let remap = |route: Option<u128>, level: usize, notes_lane: bool| {
+            // Its rows in `old`'s engine: an earlier edit's route, else its level there, as `send_live` routes.
+            let before = route.unwrap_or_else(|| {
+                let pads = u128::from(!notes_lane || level == 0) << PADS;
+                let reached = |&row: &usize| !notes_lane || stages[row] == level;
+                (0..stages.len().min(PADS))
+                    .filter(reached)
+                    .fold(pads, |rows, row| rows | 1 << row)
             });
+            let here = |row: usize| {
+                let id = old_rows.get(row)?.0;
+                rows.iter()
+                    .position(|(other, _)| *other == id)
+                    .filter(|&at| at < PADS)
+            };
+            let (mut moved, mut left) = (before & 1 << PADS, before & !(1 << PADS));
+            while left != 0 {
+                let row = left.trailing_zeros() as usize;
+                left &= left - 1;
+                moved |= here(row).map_or(0, |at| 1 << at);
+            }
+            moved
+        };
+        self.chain.take_over(&mut old.chain, now, remap);
+        for (new, old) in self.midi.iter_mut().zip(&mut old.midi) {
+            new.take_over(old, now, remap);
+        }
         self.notes_lane = old.notes_lane;
     }
 
     /// Forgets its notes in flight: all notes off on its channel alone.
     pub(super) fn clear(&mut self) {
         self.chain.clear();
+        for chain in &mut self.midi {
+            chain.clear();
+        }
     }
 }
 
@@ -129,6 +152,9 @@ impl SongAudioEngine {
         let now = self.live_frame(0);
         for live in self.live.iter_mut().flatten() {
             live.chain.set_tempo(now, f64::from(bpm));
+            for chain in &mut live.midi {
+                chain.set_tempo(now, f64::from(bpm));
+            }
         }
     }
 
@@ -154,19 +180,53 @@ impl SongAudioEngine {
         }
     }
 
-    /// Sends every live note on and off due at `cursor` into the render call.
+    pub(super) fn live_midi_key(
+        &mut self,
+        channel: usize,
+        midi: u8,
+        key: u8,
+        velocity: Option<f32>,
+    ) {
+        let now = self.live_frame(0);
+        if let Some(Some(live)) = self.live.get_mut(channel)
+            && let Some(chain) = live.midi.get_mut(midi as usize)
+        {
+            if let Some(v) = velocity {
+                chain.note_on(now, key, v, live.notes_lane);
+            } else {
+                chain.note_off(now, key);
+            }
+            let down =
+                live.chain.keys_down() | live.midi.iter().fold(0, |keys, c| keys | c.keys_down());
+            super::set_key(&mut self.sounding[channel], key, down & (1u128 << key) != 0);
+        }
+    }
+    /// Drain the normal chain and each APU MIDI channel independently.
     pub(super) fn live_due(&mut self, cursor: usize) {
         let now = self.live_frame(cursor);
         let song_beat = self.beat();
         for channel in 0..self.live.len() {
-            let Some(live) = &mut self.live[channel] else {
-                continue;
-            };
-            self.live_out.clear();
-            live.chain.due(now, song_beat, &mut self.live_out);
-            for index in 0..self.live_out.len() {
-                let event = self.live_out[index];
-                self.send_live(channel, event);
+            let count = self.live[channel].as_ref().map_or(0, |l| l.midi.len() + 1);
+            for source in 0..count {
+                self.live_out.clear();
+                let live = self.live[channel].as_mut().unwrap();
+                if source == 0 {
+                    live.chain.due(now, song_beat, &mut self.live_out);
+                } else {
+                    live.midi[source - 1].due(now, song_beat, &mut self.live_out);
+                }
+                for index in 0..self.live_out.len() {
+                    let event = self.live_out[index];
+                    self.send_live(
+                        channel,
+                        event,
+                        if source == 0 {
+                            None
+                        } else {
+                            Some((source - 1) as u8)
+                        },
+                    );
+                }
             }
         }
     }
@@ -178,7 +238,8 @@ impl SongAudioEngine {
             .live
             .iter()
             .flatten()
-            .filter_map(|live| live.chain.next_due());
+            .flat_map(|live| std::iter::once(&live.chain).chain(live.midi.iter()))
+            .filter_map(|chain| chain.next_due());
         next.min().map(|next| next.saturating_sub(now))
     }
 
@@ -190,15 +251,28 @@ impl SongAudioEngine {
                 Some(live) if queued => {
                     live.chain.clear_sent();
                     *lit |= live.chain.keys_down();
+                    for chain in &mut live.midi {
+                        chain.clear_sent();
+                        *lit |= chain.keys_down();
+                    }
                 }
-                Some(live) => live.chain.clear(),
+                Some(live) => live.clear(),
                 None => {}
             }
         }
     }
 
+    fn live_release(&mut self, channel: usize, id: i32, key: u8, midi: Option<u8>) {
+        if let Some(midi) = midi {
+            if let Some(module) = self.instrument(channel, id).filter(|m| m.hears(key)) {
+                module.instrument.note_off_midi(midi, key);
+            }
+        } else {
+            self.key_up(channel, Some(id), key);
+        }
+    }
     /// `event` to the pads and instruments of `channel` it is for.
-    fn send_live(&mut self, channel: usize, event: LiveNoteEvent) {
+    fn send_live(&mut self, channel: usize, event: LiveNoteEvent, midi: Option<u8>) {
         let LiveNoteEvent {
             level,
             notes_lane,
@@ -216,7 +290,7 @@ impl SongAudioEngine {
             for row in (0..self.instruments[channel].len().min(PADS)).filter(|r| rows >> r & 1 == 1)
             {
                 let id = self.instruments[channel][row].0;
-                self.key_up(channel, Some(id), key);
+                self.live_release(channel, id, key, midi);
             }
             return;
         }
@@ -241,11 +315,17 @@ impl SongAudioEngine {
             }
             let (id, module) = &mut self.instruments[channel][position];
             match on {
-                true if module.hears(key) => module.instrument.note_on(key, velocity, pan),
+                true if module.hears(key) => {
+                    if let Some(midi) = midi {
+                        module.instrument.note_on_midi(midi, key, velocity, pan);
+                    } else {
+                        module.instrument.note_on(key, velocity, pan);
+                    }
+                }
                 true => {}
                 false => {
                     let id = *id;
-                    self.key_up(channel, Some(id), key);
+                    self.live_release(channel, id, key, midi);
                 }
             }
         }

@@ -9,6 +9,7 @@ use crate::theme::theme_by_id;
 use crate::ui::ctrl_menu::CtrlAction;
 
 mod api;
+mod integration_instruments;
 mod kits;
 mod reference;
 mod spec_labels;

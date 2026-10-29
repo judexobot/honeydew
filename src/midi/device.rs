@@ -830,20 +830,23 @@ mod tests {
     }
 }
 
-// shortcut: this preview has no Android MIDI service bridge; enable the menu when one is available.
 #[cfg(target_os = "android")]
 mod backend {
     use super::*;
-
     pub fn lister() -> impl FnMut() -> Vec<String> {
-        Vec::new
+        crate::android::midi::ports
     }
-
     pub fn open(
-        _: &MidiChoice,
-        _: SyncSender<Vec<u8>>,
-        _: Option<Context>,
+        choice: &MidiChoice,
+        tx: SyncSender<Vec<u8>>,
+        ctx: Option<Context>,
     ) -> Result<Box<dyn Any>, String> {
-        Ok(Box::new(()))
+        if let MidiChoice::Named(name) = choice
+            && !crate::android::midi::ports().contains(name)
+        {
+            return Err(format!("no MIDI input named {name}"));
+        }
+        crate::android::midi::open(choice.label(), tx, ctx)
+            .map(|session| Box::new(session) as Box<dyn Any>)
     }
 }

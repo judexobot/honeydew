@@ -188,6 +188,16 @@ impl SongAudioEngine {
                 built.instrument.set_tempo_bpm(self.tempo_bpm);
             }
             self.held[channel][row] = old.held[from][old_row];
+            for midi in 0..4 {
+                let target = self.instruments[channel].len() + 1 + row * 4 + midi;
+                let source = old.instruments[from].len() + 1 + old_row * 4 + midi;
+                if let (Some(target), Some(source)) = (
+                    self.held[channel].get_mut(target),
+                    old.held[from].get(source),
+                ) {
+                    *target = *source;
+                }
+            }
             self.sustained[channel][row] = old.sustained[from][old_row];
         }
         // The pads' notes, held after the instruments' rows.

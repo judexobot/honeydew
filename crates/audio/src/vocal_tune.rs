@@ -1,14 +1,17 @@
-//! VocalTune 0.3: independent, experimental monophonic real-time pitch correction.
-//! Pitch estimation: decimated YIN; shifting: dual overlapping variable-delay taps.
-//! This is not a clone of any existing Honeydew Pitcher implementation.
-use std::f32::consts::PI;
+//! Independent monophonic vocal correction: anti-aliased YIN, linked stereo
+//! phase-locked spectral shifting and cepstral formant preservation.
+mod spectral;
+use spectral::Spectral;
+use std::f32::consts::{PI, TAU};
 
-const HISTORY: usize = 8192;
-const YIN_POINTS: usize = 256;
-const MAX_LAG: usize = 220;
-const MIN_DELAY: f32 = 512.0;
-const DELAY_SPAN: f32 = 2048.0;
-const DRY_DELAY: usize = 1536;
+pub const NUM_PARAMS: usize = 33;
+pub const DEFAULTS: [f32; NUM_PARAMS] = [
+    1.0, 0.0, 0.0, 1.0, 0.25, 1.0, 0.2, 0.5, 0.1, 0.5, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+    1.0, 1.0, 1.0, 1.0, 1.0, 0.75, 1.0, 0.5, 0.35, 0.15, 0.1, 0.0, 0.5, 0.0,
+];
+const HISTORY: usize = 16_384;
+const DETECTOR: usize = 1024;
+const MAX_LAG: usize = 256;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scale {
@@ -19,7 +22,6 @@ pub enum Scale {
     Blues,
     Custom,
 }
-
 #[derive(Clone, Copy, Debug)]
 pub struct Parameters {
     pub root: u8,
@@ -33,11 +35,19 @@ pub struct Parameters {
     pub reference_hz: f32,
     pub hard_tune: bool,
     pub detune_cents: f32,
-    /// Bit 0 is C and bit 11 is B, for Custom mode.
     pub custom_notes: u16,
     pub protect_sibilants: f32,
+    pub formant_preserve: bool,
+    pub formant_shift: f32,
+    pub vibrato: f32,
+    pub transition_ms: f32,
+    pub flex_cents: f32,
+    /// 0: full (55..1500 Hz), 1: low, 2: medium, 3: high.
+    pub input_range: u8,
+    pub output_db: f32,
+    pub studio: bool,
+    pub enabled: bool,
 }
-
 impl Default for Parameters {
     fn default() -> Self {
         Self {
@@ -52,8 +62,17 @@ impl Default for Parameters {
             reference_hz: 440.0,
             hard_tune: false,
             detune_cents: 0.0,
-            custom_notes: 0x0fff,
+            custom_notes: 0xfff,
             protect_sibilants: 0.75,
+            formant_preserve: true,
+            formant_shift: 0.0,
+            vibrato: 0.35,
+            transition_ms: 15.0,
+            flex_cents: 10.0,
+            input_range: 0,
+            output_db: 0.0,
+            studio: false,
+            enabled: true,
         }
     }
 }
@@ -61,73 +80,142 @@ impl Default for Parameters {
 pub struct VocalTune {
     rate: f32,
     decimation: usize,
-    analysis_hop: u64,
+    hop: usize,
     params: Parameters,
-    left: Box<[f32; HISTORY]>,
-    right: Box<[f32; HISTORY]>,
-    mono: Box<[f32; HISTORY]>,
-    scores: [f32; MAX_LAG + 1],
-    written: u64,
+    spectral: [Spectral; 2],
+    left: Vec<f32>,
+    right: Vec<f32>,
     at: usize,
-    phase: f32,
-    ratio: f32,
-    target_ratio: f32,
-    retune_alpha: f32,
-    voiced: f32,
+    written: u64,
+    fir: Vec<f32>,
+    fir_ring: Vec<f32>,
+    fir_at: usize,
+    detector: [f32; DETECTOR],
+    detector_at: usize,
+    detector_written: usize,
+    scores: [f32; MAX_LAG + 1],
     pitch_hz: Option<f32>,
     note: Option<i32>,
-    sustain_samples: u64,
+    ratio: f32,
+    target_ratio: f32,
     clarity: f32,
     sibilance: f32,
+    voiced: f32,
+    sustain: usize,
+    base_midi: f32,
+    recent: [f32; 3],
+    pitch_count: usize,
+    retune_alpha: f32,
+    gain: f32,
+    target_gain: f32,
+    bypass: f32,
+    dry: (f32, f32),
+    energies: [f32; 2],
+    switch_from: Option<usize>,
+    switch_left: usize,
+    switch_total: usize,
 }
 impl VocalTune {
     pub fn new(rate: u32) -> Result<Self, &'static str> {
         if !(8_000..=192_000).contains(&rate) {
             return Err("unsupported sample rate");
         }
-        let rate = rate as f32;
+        let decimation = (rate as f32 / 12_000.0).ceil().max(1.0) as usize;
+        let taps = decimation * 16 + 1;
+        let cutoff = 0.44 / decimation as f32;
+        let mut fir: Vec<f32> = (0..taps)
+            .map(|i| {
+                let t = i as f32 - (taps - 1) as f32 * 0.5;
+                let sinc = if t.abs() < 1e-6 {
+                    2.0 * cutoff
+                } else {
+                    (TAU * cutoff * t).sin() / (PI * t)
+                };
+                sinc * (0.42 - 0.5 * (TAU * i as f32 / (taps - 1) as f32).cos()
+                    + 0.08 * (2.0 * TAU * i as f32 / (taps - 1) as f32).cos())
+            })
+            .collect();
+        let sum: f32 = fir.iter().sum();
+        for v in &mut fir {
+            *v /= sum;
+        }
         let mut out = Self {
-            rate,
-            decimation: (rate / 12_000.0).round().max(1.0) as usize,
-            analysis_hop: (rate / 100.0).round() as u64,
+            rate: rate as f32,
+            decimation,
+            hop: (rate as usize / 200).max(1),
             params: Parameters::default(),
-            left: Box::new([0.0; HISTORY]),
-            right: Box::new([0.0; HISTORY]),
-            mono: Box::new([0.0; HISTORY]),
-            scores: [0.0; MAX_LAG + 1],
-            written: 0,
+            spectral: [Spectral::new(rate, false), Spectral::new(rate, true)],
+            left: vec![0.0; HISTORY],
+            right: vec![0.0; HISTORY],
             at: 0,
-            phase: 0.0,
-            ratio: 1.0,
-            target_ratio: 1.0,
-            retune_alpha: 0.0,
-            voiced: 0.0,
+            written: 0,
+            fir_ring: vec![0.0; taps],
+            fir,
+            fir_at: 0,
+            detector: [0.0; DETECTOR],
+            detector_at: 0,
+            detector_written: 0,
+            scores: [1.0; MAX_LAG + 1],
             pitch_hz: None,
             note: None,
-            sustain_samples: 0,
+            ratio: 1.0,
+            target_ratio: 1.0,
             clarity: 0.0,
             sibilance: 0.0,
+            voiced: 0.0,
+            sustain: 0,
+            base_midi: 69.0,
+            recent: [69.0; 3],
+            pitch_count: 0,
+            retune_alpha: 0.0,
+            gain: 1.0,
+            target_gain: 1.0,
+            bypass: 1.0,
+            dry: (0.0, 0.0),
+            energies: [0.0; 2],
+            switch_from: None,
+            switch_left: 0,
+            switch_total: 0,
         };
         out.set_parameters(Parameters::default());
         Ok(out)
     }
     pub fn set_parameters(&mut self, p: Parameters) {
+        if p.studio != self.params.studio {
+            let new = usize::from(p.studio);
+            self.spectral[new].reset();
+            if self.written > 0 {
+                self.switch_from = Some(usize::from(self.params.studio));
+                self.switch_total = self.spectral[new].latency() + (self.rate * 0.020) as usize;
+                self.switch_left = self.switch_total;
+            }
+        }
         self.params = Parameters {
             root: p.root % 12,
             scale: p.scale,
-            correction: finite_clamp(p.correction, 0.0, 1.0, 1.0),
-            retune_ms: finite_clamp(p.retune_ms, 2.0, 300.0, 25.0),
-            wet: finite_clamp(p.wet, 0.0, 1.0, 1.0),
-            humanize: finite_clamp(p.humanize, 0.0, 1.0, 0.2),
-            sensitivity: finite_clamp(p.sensitivity, 0.0, 1.0, 0.5),
-            deadband_cents: finite_clamp(p.deadband_cents, 0.0, 50.0, 5.0),
-            reference_hz: finite_clamp(p.reference_hz, 430.0, 450.0, 440.0),
+            correction: clean(p.correction, 0.0, 1.0, 1.0),
+            retune_ms: clean(p.retune_ms, 2.0, 300.0, 25.0),
+            wet: clean(p.wet, 0.0, 1.0, 1.0),
+            humanize: clean(p.humanize, 0.0, 1.0, 0.2),
+            sensitivity: clean(p.sensitivity, 0.0, 1.0, 0.5),
+            deadband_cents: clean(p.deadband_cents, 0.0, 50.0, 5.0),
+            reference_hz: clean(p.reference_hz, 430.0, 450.0, 440.0),
             hard_tune: p.hard_tune,
-            detune_cents: finite_clamp(p.detune_cents, -50.0, 50.0, 0.0),
-            custom_notes: p.custom_notes & 0x0fff,
-            protect_sibilants: finite_clamp(p.protect_sibilants, 0.0, 1.0, 0.75),
+            detune_cents: clean(p.detune_cents, -50.0, 50.0, 0.0),
+            custom_notes: p.custom_notes & 0xfff,
+            protect_sibilants: clean(p.protect_sibilants, 0.0, 1.0, 0.75),
+            formant_preserve: p.formant_preserve,
+            formant_shift: clean(p.formant_shift, -12.0, 12.0, 0.0),
+            vibrato: clean(p.vibrato, 0.0, 1.0, 0.35),
+            transition_ms: clean(p.transition_ms, 0.0, 200.0, 15.0),
+            flex_cents: clean(p.flex_cents, 0.0, 100.0, 10.0),
+            input_range: p.input_range.min(3),
+            output_db: clean(p.output_db, -24.0, 24.0, 0.0),
+            studio: p.studio,
+            enabled: p.enabled,
         };
         self.retune_alpha = 1.0 - (-1000.0 / (self.params.retune_ms * self.rate)).exp();
+        self.target_gain = 10.0_f32.powf(self.params.output_db / 20.0);
     }
     pub fn parameters(&self) -> Parameters {
         self.params
@@ -144,222 +232,317 @@ impl VocalTune {
     pub fn clarity(&self) -> f32 {
         self.clarity
     }
-    pub const fn latency_samples(&self) -> usize {
-        DRY_DELAY
+    pub fn latency_samples(&self) -> usize {
+        self.spectral[usize::from(self.params.studio)].latency()
     }
-
+    pub fn maximum_latency_samples(&self) -> usize {
+        self.spectral[1].latency()
+    }
+    /// The same latency-aligned dry signal used by the effect, for the host's common Mix.
+    pub fn dry_frame(&self) -> (f32, f32) {
+        self.dry
+    }
     pub fn reset(&mut self) {
         self.left.fill(0.0);
         self.right.fill(0.0);
-        self.mono.fill(0.0);
-        self.scores.fill(0.0);
-        self.written = 0;
+        self.detector.fill(0.0);
+        self.fir_ring.fill(0.0);
+        for s in &mut self.spectral {
+            s.reset();
+        }
         self.at = 0;
-        self.phase = 0.0;
+        self.written = 0;
+        self.detector_at = 0;
+        self.detector_written = 0;
+        self.fir_at = 0;
         self.ratio = 1.0;
         self.target_ratio = 1.0;
         self.voiced = 0.0;
         self.pitch_hz = None;
         self.note = None;
-        self.sustain_samples = 0;
+        self.sustain = 0;
         self.clarity = 0.0;
         self.sibilance = 0.0;
+        self.pitch_count = 0;
+        self.gain = self.target_gain;
+        self.bypass = f32::from(self.params.enabled);
+        self.dry = (0.0, 0.0);
+        self.energies = [0.0; 2];
+        self.switch_from = None;
+        self.switch_left = 0;
     }
     pub fn process(&mut self, left: &mut [f32], right: &mut [f32]) -> Result<(), &'static str> {
         if left.len() != right.len() {
             return Err("channel length mismatch");
         }
-        for (l, r) in left.iter_mut().zip(right.iter_mut()) {
+        for (l, r) in left.iter_mut().zip(right) {
             (*l, *r) = self.process_frame(*l, *r);
         }
         Ok(())
     }
     pub fn process_frame(&mut self, left: f32, right: f32) -> (f32, f32) {
-        let left = if left.is_finite() { left } else { 0.0 };
-        let right = if right.is_finite() { right } else { 0.0 };
-        self.left[self.at] = left;
-        self.right[self.at] = right;
-        self.mono[self.at] = (left + right) * 0.5;
-        if self.written >= 4096 && self.written.is_multiple_of(self.analysis_hop) {
+        let input = [
+            if left.is_finite() { left } else { 0.0 },
+            if right.is_finite() { right } else { 0.0 },
+        ];
+        self.left[self.at] = input[0];
+        self.right[self.at] = input[1];
+        for (energy, x) in self.energies.iter_mut().zip(input) {
+            *energy += (x * x - *energy) * 0.001;
+        }
+        // Prefer the louder channel; a mid signal alone loses an anti-phase vocal.
+        let mono = if self.energies[0] >= self.energies[1] {
+            input[0]
+        } else {
+            input[1]
+        };
+        self.fir_ring[self.fir_at] = mono;
+        self.fir_at = (self.fir_at + 1) % self.fir.len();
+        if self.written.is_multiple_of(self.decimation as u64) {
+            let mut x = 0.0;
+            for (j, &coefficient) in self.fir.iter().enumerate() {
+                x += self.fir_ring[(self.fir_at + j) % self.fir.len()] * coefficient;
+            }
+            self.detector[self.detector_at] = x;
+            self.detector_at = (self.detector_at + 1) % DETECTOR;
+            self.detector_written = self.detector_written.saturating_add(1);
+        }
+        if self.written.is_multiple_of(self.hop as u64) && self.detector_written >= 640 {
             self.analyze();
         }
-        let held = (self.sustain_samples as f32 / (0.35 * self.rate)).min(1.0);
+        let held = (self.sustain as f32 / (self.rate * 0.35)).min(1.0);
         let humanize = if self.params.hard_tune {
             0.0
         } else {
             self.params.humanize
         };
-        let alpha = if self.params.hard_tune {
-            1.0 - (-1000.0 / (2.0 * self.rate)).exp()
+        let transition = if self.params.hard_tune {
+            1.0
         } else {
-            self.retune_alpha / (1.0 + 5.0 * humanize * held)
+            1.0 + self.params.transition_ms / self.params.retune_ms * (1.0 - held)
         };
+        let alpha = self.retune_alpha / ((1.0 + 5.0 * humanize * held) * transition);
         self.ratio += (self.target_ratio - self.ratio) * alpha;
-        let target_voiced = if self.pitch_hz.is_some() { 1.0 } else { 0.0 };
-        self.voiced += (target_voiced - self.voiced) * 0.001;
-        self.phase = (self.phase + (1.0 - self.ratio) / DELAY_SPAN).rem_euclid(1.0);
-        let other_phase = (self.phase + 0.5).fract();
-        let w = (self.phase * PI).sin().powi(2);
-        let dry_l = tap(&self.left, self.at, DRY_DELAY as f32);
-        let dry_r = tap(&self.right, self.at, DRY_DELAY as f32);
-        let d1 = MIN_DELAY + DELAY_SPAN * self.phase;
-        let d2 = MIN_DELAY + DELAY_SPAN * other_phase;
-        let wet_l = w * tap(&self.left, self.at, d1) + (1.0 - w) * tap(&self.left, self.at, d2);
-        let wet_r = w * tap(&self.right, self.at, d1) + (1.0 - w) * tap(&self.right, self.at, d2);
-        // At exact unison bypass the delay-tap comb coloration. Fade near unison.
-        let shift_weight = ((self.ratio - 1.0).abs() * 100.0).min(1.0);
-        // Guard noisy consonants and ambiguous periodicity against metallic artifacts.
-        let consonant_gate = 1.0 - self.params.protect_sibilants * self.sibilance;
-        let confidence_gate = (self.clarity * 2.0).min(1.0);
-        let mix = self.params.wet * self.voiced * shift_weight * consonant_gate * confidence_gate;
-        self.written += 1;
+        self.voiced +=
+            (f32::from(self.pitch_hz.is_some()) - self.voiced) * (1.0 / (self.rate * 0.004));
+        self.gain += (self.target_gain - self.gain) * 0.001;
+        self.bypass += (f32::from(self.params.enabled) - self.bypass) * 0.002;
+        let profile = usize::from(self.params.studio);
+        let delay = self.spectral[profile].latency();
+        let read = (self.at + HISTORY - delay) % HISTORY;
+        self.dry = (self.left[read], self.right[read]);
+        let wet = self.spectral[profile].frame(
+            input,
+            self.ratio,
+            self.pitch_hz.unwrap_or(150.0),
+            self.params.formant_preserve,
+            self.params.formant_shift,
+            self.params.protect_sibilants,
+        );
+        let mix = self.params.wet
+            * self.voiced
+            * (1.0 - self.sibilance * self.params.protect_sibilants)
+            * self.bypass;
+        let gain = 1.0 + (self.gain - 1.0) * self.bypass;
+        let mut output = [
+            self.dry.0 + (wet[0] - self.dry.0) * mix,
+            self.dry.1 + (wet[1] - self.dry.1) * mix,
+        ];
+        if let Some(old) = self.switch_from {
+            let old_delay = self.spectral[old].latency();
+            let read = (self.at + HISTORY - old_delay) % HISTORY;
+            let old_dry = [self.left[read], self.right[read]];
+            let old_wet = self.spectral[old].frame(
+                input,
+                self.ratio,
+                self.pitch_hz.unwrap_or(150.0),
+                self.params.formant_preserve,
+                self.params.formant_shift,
+                self.params.protect_sibilants,
+            );
+            let fade = (self.rate * 0.020).max(1.0);
+            let weight = (1.0 - self.switch_left as f32 / fade).clamp(0.0, 1.0);
+            for ch in 0..2 {
+                let old_output = old_dry[ch] + (old_wet[ch] - old_dry[ch]) * mix;
+                output[ch] = old_output + (output[ch] - old_output) * weight;
+            }
+            self.dry = (
+                old_dry[0] + (self.dry.0 - old_dry[0]) * weight,
+                old_dry[1] + (self.dry.1 - old_dry[1]) * weight,
+            );
+            self.switch_left = self.switch_left.saturating_sub(1);
+            if self.switch_left == 0 {
+                self.switch_from = None;
+            }
+        }
         self.at = (self.at + 1) % HISTORY;
-        (dry_l + (wet_l - dry_l) * mix, dry_r + (wet_r - dry_r) * mix)
+        self.written += 1;
+        (output[0] * gain, output[1] * gain)
+    }
+    fn sample(&self, delay: usize) -> f32 {
+        self.detector[(self.detector_at + DETECTOR - 1 - delay) % DETECTOR]
     }
     fn analyze(&mut self) {
-        let stride = self.decimation;
-        let min_lag = ((self.rate / 1100.0) / stride as f32).floor().max(2.0) as usize;
-        let max_lag = ((self.rate / 70.0) / stride as f32)
-            .ceil()
-            .min(MAX_LAG as f32) as usize;
+        let rate = self.rate / self.decimation as f32;
+        let (low, high) = match self.params.input_range {
+            1 => (55.0, 440.0),
+            2 => (80.0, 880.0),
+            3 => (130.0, 1500.0),
+            _ => (55.0, 1500.0),
+        };
+        let min_lag = (rate / high).floor().max(2.0) as usize;
+        let max_lag = ((rate / low).ceil() as usize).min(MAX_LAG);
+        let points = if self.params.studio { 384 } else { 256 };
         let mut energy = 0.0;
-        let mut absolute = 0.0;
         let mut roughness = 0.0;
-        let mut previous = 0.0f32;
-        for j in 0..YIN_POINTS {
-            let x = self.mono[lag_index(self.at, j * stride)];
+        let mut absolute = 0.0;
+        for j in 0..points {
+            let x = self.sample(j);
             energy += x * x;
             absolute += x.abs();
-            if j != 0 {
-                roughness += (x - previous).abs();
+            if j > 0 {
+                roughness += (x - self.sample(j - 1)).abs();
             }
-            previous = x;
         }
-        // A turbulence estimate: higher for consonant-like noise than periodic vowels.
-        let relative_roughness = roughness / (2.0 * absolute + 1e-6);
-        self.sibilance = ((relative_roughness - 0.22) / 0.40).clamp(0.0, 1.0);
-        let floor = 0.00005 - 0.000048 * self.params.sensitivity;
-        if energy < floor * YIN_POINTS as f32 {
+        self.sibilance = ((roughness / (2.0 * absolute + 1e-8) - 0.28) / 0.45).clamp(0.0, 1.0);
+        if energy / (points as f32) < 0.00005 - self.params.sensitivity * 0.000049 {
             self.unvoiced();
             return;
         }
+        let threshold = 0.08 + 0.18 * self.params.sensitivity;
         let mut cumulative = 0.0;
-        let mut best = (0, 1.0f32);
-        let mut first = None;
+        let mut best = (min_lag, 1.0);
         for lag in 1..=max_lag {
-            let mut diff = 0.0;
-            for j in 0..YIN_POINTS {
-                let i = j * stride;
-                let d = self.mono[lag_index(self.at, i)]
-                    - self.mono[lag_index(self.at, i + lag * stride)];
-                diff += d * d;
+            let mut d = 0.0;
+            for j in 0..points {
+                let difference = self.sample(j) - self.sample(j + lag);
+                d += difference * difference;
             }
-            cumulative += diff;
-            let score = if cumulative > 1e-10 {
-                diff * lag as f32 / cumulative
+            cumulative += d;
+            self.scores[lag] = if cumulative > 1e-12 {
+                d * lag as f32 / cumulative
             } else {
                 1.0
             };
-            self.scores[lag] = score;
-            if lag >= min_lag {
-                if score < best.1 {
-                    best = (lag, score);
-                }
-                if score < 0.10 + 0.16 * self.params.sensitivity && first.is_none() {
-                    first = Some(lag);
-                }
+            if lag >= min_lag && self.scores[lag] < best.1 {
+                best = (lag, self.scores[lag]);
             }
         }
-        let mut lag = first.unwrap_or(best.0);
-        if lag < 2 || best.1 > 0.13 + 0.2 * self.params.sensitivity {
+        if best.1 > threshold + 0.1 {
             self.unvoiced();
             return;
         }
+        let mut lag = (min_lag..=max_lag)
+            .find(|&l| self.scores[l] < threshold)
+            .unwrap_or(best.0);
         while lag < max_lag && self.scores[lag + 1] < self.scores[lag] {
             lag += 1;
+        }
+        if let Some(previous) = self.pitch_hz {
+            let old = (rate / previous).round() as usize;
+            if old >= min_lag
+                && old < max_lag
+                && self.scores[old] < self.scores[lag] + 0.025
+                && (1200.0 * (rate / lag as f32 / previous).log2()).abs() > 700.0
+            {
+                lag = old;
+            }
         }
         let a = self.scores[lag - 1];
         let b = self.scores[lag];
         let c = self.scores[(lag + 1).min(max_lag)];
         let den = a - 2.0 * b + c;
         let frac = if den.abs() > 1e-8 {
-            (0.5 * (a - c) / den).clamp(-1.0, 1.0)
+            (0.5 * (a - c) / den).clamp(-0.5, 0.5)
         } else {
             0.0
         };
-        let hz = self.rate / ((lag as f32 + frac) * stride as f32);
-        if !(70.0..=1100.0).contains(&hz) || !hz.is_finite() {
+        let hz = rate / (lag as f32 + frac);
+        if !hz.is_finite() || hz < low * 0.98 || hz > high * 1.02 {
             self.unvoiced();
             return;
         }
+        self.clarity = (1.0 - b).clamp(0.0, 1.0);
+        self.sibilance *= 1.0 - self.clarity;
         self.pitch_hz = Some(hz);
-        self.clarity = (1.0 - self.scores[lag]).clamp(0.0, 1.0);
-        let midi = 69.0 + 12.0 * (hz / self.params.reference_hz).log2();
-        let next = nearest_note_with_mask(
+        let raw = 69.0 + 12.0 * (hz / self.params.reference_hz).log2();
+        self.recent[self.pitch_count % 3] = raw;
+        self.pitch_count = self.pitch_count.saturating_add(1);
+        let mut pitches = self.recent;
+        pitches.sort_by(f32::total_cmp);
+        let midi = if self.pitch_count >= 3 {
+            pitches[1]
+        } else {
+            raw
+        };
+        if self.pitch_count < 3 || (midi - self.base_midi).abs() > 0.75 {
+            self.base_midi = midi;
+        } else {
+            self.base_midi += (midi - self.base_midi) * 0.12;
+        }
+        let mut next = nearest_note_with_mask(
             midi,
             self.params.root,
             self.params.scale,
             self.params.custom_notes,
         );
-        let next = match (next, self.note) {
-            (Some(n), Some(prev))
-                if n != prev
-                    && allowed(
-                        prev,
-                        self.params.root,
-                        self.params.scale,
-                        self.params.custom_notes,
-                    )
-                    && (midi - prev as f32).abs() < (midi - n as f32).abs() + 0.10 =>
-            {
-                Some(prev)
-            }
-            (other, _) => other,
-        };
-        if self.note == next {
-            self.sustain_samples = self.sustain_samples.saturating_add(self.analysis_hop);
+        if let (Some(n), Some(old)) = (next, self.note)
+            && allowed(
+                old,
+                self.params.root,
+                self.params.scale,
+                self.params.custom_notes,
+            )
+            && n != old
+            && (midi - old as f32).abs() < (midi - n as f32).abs() + 0.08
+        {
+            next = Some(old);
+        }
+        if next == self.note {
+            self.sustain = self.sustain.saturating_add(self.hop);
         } else {
-            self.sustain_samples = 0;
+            self.sustain = 0;
         }
         self.note = next;
-        self.target_ratio = next.map_or(1.0, |n| {
-            let cents = (n as f32 - midi) * 100.0;
-            let hard = self.params.hard_tune;
-            let cents = if !hard && cents.abs() < self.params.deadband_cents {
-                0.0
-            } else {
-                cents * if hard { 1.0 } else { self.params.correction }
-            };
-            2.0f32
-                .powf((cents + self.params.detune_cents) / 1200.0)
-                .clamp(0.85, 1.18)
+        let cents = next.map_or(0.0, |n| {
+            let mut correction = (n as f32 - midi) * 100.0;
+            if !self.params.hard_tune {
+                correction += (midi - self.base_midi) * 100.0 * self.params.vibrato;
+                if correction.abs() < self.params.deadband_cents {
+                    correction = 0.0;
+                } else if self.params.flex_cents > 0.0 {
+                    correction *= (correction.abs() / self.params.flex_cents).min(1.0);
+                }
+            }
+            correction * self.params.correction + self.params.detune_cents
         });
+        self.target_ratio = 2.0_f32.powf(cents / 1200.0).clamp(0.5, 2.0);
     }
     fn unvoiced(&mut self) {
         self.pitch_hz = None;
         self.note = None;
         self.clarity = 0.0;
         self.target_ratio = 1.0;
-        self.sustain_samples = 0;
+        self.sustain = 0;
+        self.pitch_count = 0;
     }
 }
-fn finite_clamp(v: f32, min: f32, max: f32, fallback: f32) -> f32 {
-    if v.is_finite() {
-        v.clamp(min, max)
+fn clean(x: f32, low: f32, high: f32, default: f32) -> f32 {
+    if x.is_finite() {
+        x.clamp(low, high)
     } else {
-        fallback
+        default
     }
 }
-fn lag_index(write: usize, delay: usize) -> usize {
-    (write + HISTORY - delay % HISTORY) % HISTORY
-}
-fn tap(ring: &[f32; HISTORY], write: usize, delay: f32) -> f32 {
-    let delay = delay.clamp(0.0, (HISTORY - 2) as f32);
-    let whole = delay.floor() as usize;
-    let frac = delay - whole as f32;
-    let a = ring[lag_index(write, whole)];
-    let b = ring[lag_index(write, whole + 1)];
-    a + (b - a) * frac
+/// The absolute C..B mask of a built-in or user scale.
+pub fn scale_mask(root: u8, scale: Scale, custom: u16) -> u16 {
+    (0..12).fold(0, |mask, n| {
+        if allowed(n, root, scale, custom) {
+            mask | (1 << n)
+        } else {
+            mask
+        }
+    })
 }
 fn allowed(m: i32, root: u8, scale: Scale, custom_notes: u16) -> bool {
     match scale {

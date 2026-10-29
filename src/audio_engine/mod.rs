@@ -109,6 +109,9 @@ pub enum EngineError {
 pub struct SongAudioEngine {
     audio: AudioPlayback,
     mixer: Mixer,
+    compensation: honeydew_audio::latency::DelayCompensation,
+    click_delay: honeydew_audio::latency::StereoDelay,
+    click_buffer: OwnedStereoBuffer,
     /// Enabled by the audio command; the pool itself is prepared by the UI.
     multi_core: bool,
     /// Per channel, its instruments in rack order, by instance id.
@@ -209,6 +212,8 @@ pub struct SongAudioEngine {
     rendered: u64,
     monitor: Option<Monitor>,
     /// Built for a song edit: it takes over the engine it replaces ([`Self::adopting`]).
+    #[cfg(target_os = "android")]
+    android_paused: bool,
     adopt: bool,
     /// The edit's position re-sync runs as it takes over ([`Self::adopting_edit`]).
     resync: bool,
@@ -219,6 +224,10 @@ pub struct SongAudioEngine {
 }
 
 impl SongAudioEngine {
+    /// Added path latency of VocalTune, including sends and the master rack.
+    pub fn output_latency_samples(&self) -> usize {
+        self.compensation.output_latency()
+    }
     /// The engine for `song` with no samples: every sample is missing (silent).
     pub fn new(song: &Song, sample_rate: f32) -> Result<Self, EngineError> {
         Self::with_samples(song, sample_rate, &SampleCache::default())
@@ -269,6 +278,14 @@ impl SongAudioEngine {
         }
         let (mixes, routing) = routing::build(song);
         let mixer = Mixer::new(&mixes).map_err(EngineError::Mixer)?;
+        let maximum: Vec<_> = bridge
+            .audio
+            .channels_mut()
+            .iter()
+            .map(|c| c.maximum_vocal_latency())
+            .collect();
+        let compensation = honeydew_audio::latency::DelayCompensation::new(&mixer, &maximum);
+        let click_delay = honeydew_audio::latency::StereoDelay::new(compensation.maximum());
         let mut instruments = Vec::with_capacity(song.channels.len());
         let mut kits = Vec::with_capacity(song.channels.len());
         let mut clips = Vec::with_capacity(song.channels.len());
@@ -404,16 +421,37 @@ impl SongAudioEngine {
             .collect();
         let held: Vec<_> = instruments
             .iter()
-            .map(|modules| vec![[0; 128]; modules.len() + 1])
+            .enumerate()
+            .map(|(channel, modules)| {
+                // Extra address rows only on APU racks; checkpoints retain MIDI identity on seeks and loops.
+                let midi = song.channels[channel]
+                    .rack
+                    .modules
+                    .iter()
+                    .any(|m| m.type_id == 54);
+                vec![[0; 128]; modules.len() + 1 + if midi { 4 * modules.len() } else { 0 }]
+            })
             .collect();
         let held_pads: Vec<_> = (kits.iter())
             .map(|kit| vec![0; kit.as_ref().map_or(0, |kit| kit.sampler.pads())])
             .collect();
         let settings = settings::saved(song);
         let checkpoints = Checkpoints::new(&actions, &instruments, &held, &held_pads);
+        for (channel, rows) in instruments.iter_mut().enumerate() {
+            let maximum = compensation.maximum_input_latency(channel) + maximum[channel];
+            for (_, module) in rows {
+                module.prepare_latency(maximum);
+            }
+        }
         let mut engine = Self {
             audio: bridge.audio,
             mixer,
+            compensation,
+            click_delay,
+            click_buffer: OwnedStereoBuffer {
+                left: vec![0.0; BLOCK_FRAMES],
+                right: vec![0.0; BLOCK_FRAMES],
+            },
             multi_core: false,
             instruments,
             kits,
@@ -482,6 +520,8 @@ impl SongAudioEngine {
             ping: None,
             rendered: 0,
             monitor: input.and_then(|input| Monitor::new(song, input, sample_rate)),
+            #[cfg(target_os = "android")]
+            android_paused: false,
             adopt: false,
             resync: false,
             silence: Vec::new(),
@@ -490,6 +530,12 @@ impl SongAudioEngine {
         engine.sync_mixer_controls();
         engine.apply_settings();
         engine.restore_params(0, false);
+        for (index, channel) in engine.audio.channels_mut().iter().enumerate() {
+            engine
+                .compensation
+                .set_rack_latency(index, channel.vocal_latency_before(usize::MAX));
+        }
+        engine.compensation.update(&engine.mixer);
         engine.set_loop(
             song.play_loop
                 .map(|(start, end)| (start.into(), end.into())),
@@ -649,6 +695,33 @@ impl SongAudioEngine {
         {
             let event = self.actions[self.action_index];
             match event.action {
+                Action::MidiNote {
+                    instance_id,
+                    midi,
+                    key,
+                    velocity,
+                    pan,
+                } => {
+                    let modules = &self.instruments[event.channel];
+                    let remaining = modules
+                        .iter()
+                        .position(|(id, _)| *id == instance_id)
+                        .and_then(|row| {
+                            self.held[event.channel]
+                                .get(modules.len() + 1 + row * 4 + usize::from(midi))
+                        })
+                        .map_or(0, |keys| keys[usize::from(key)]);
+                    if let Some(module) = self
+                        .instrument(event.channel, instance_id)
+                        .filter(|m| m.hears(key))
+                    {
+                        if let Some(v) = velocity {
+                            module.instrument.note_on_midi(midi, key, v, pan);
+                        } else if remaining <= 1 {
+                            module.instrument.note_off_midi(midi, key);
+                        }
+                    }
+                }
                 Action::NoteOn {
                     instance_id: KIT,
                     key,
@@ -737,6 +810,13 @@ impl SongAudioEngine {
     }
 
     fn render_segment(&mut self, output: &mut [f32], channels: usize, frames: usize) {
+        if self.compensation.enabled() {
+            for (index, channel) in self.audio.channels_mut().iter().enumerate() {
+                self.compensation
+                    .set_rack_latency(index, channel.vocal_latency_before(usize::MAX));
+            }
+            self.compensation.update(&self.mixer);
+        }
         for buffer in &mut self.buffers {
             buffer.left.resize(frames, 0.0);
             buffer.right.resize(frames, 0.0);
@@ -762,6 +842,7 @@ impl SongAudioEngine {
         if let Some(monitor) = &mut self.monitor {
             monitor.add(&mut self.buffers, frames);
         }
+        self.compensation.delay_raw(&mut self.buffers);
         if !self.process_racks(context, frames) {
             return;
         }
@@ -778,7 +859,24 @@ impl SongAudioEngine {
         }
         // The click and the sample preview go out past the master and its meter.
         let master = &mut self.buffers[0];
-        self.metronome.add(&mut master.left, &mut master.right);
+        if self.compensation.enabled() {
+            let (l, r) = (
+                &mut self.click_buffer.left[..frames],
+                &mut self.click_buffer.right[..frames],
+            );
+            l.fill(0.0);
+            r.fill(0.0);
+            self.metronome.add(l, r);
+            self.click_delay
+                .set_delay(self.compensation.output_latency());
+            self.click_delay.process(l, r);
+            for i in 0..frames {
+                master.left[i] += l[i];
+                master.right[i] += r[i];
+            }
+        } else {
+            self.metronome.add(&mut master.left, &mut master.right);
+        }
         if let Some(preview) = &mut self.preview
             && !preview.add(&mut master.left, &mut master.right)
         {
@@ -794,10 +892,26 @@ impl SongAudioEngine {
         }
     }
 
-    fn process_racks(&mut self, context: ProcessContext, frames: usize) -> bool {
+    fn process_racks(&mut self, context: ProcessContext, _frames: usize) -> bool {
+        if self.compensation.enabled() {
+            for (index, (audio, rows)) in self
+                .audio
+                .channels_mut()
+                .iter()
+                .zip(&mut self.instruments)
+                .enumerate()
+            {
+                for (_, module) in rows {
+                    module.set_latency(
+                        self.compensation.input_latency(index)
+                            + audio.vocal_latency_before(module.effects_above),
+                    );
+                }
+            }
+        }
         #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
         if self.multi_core
-            && frames >= 128
+            && _frames >= 128
             && self.mixer.has_parallel_stage()
             && let Some(pool) = parallel::pool()
         {
@@ -823,7 +937,7 @@ impl SongAudioEngine {
                     {
                         return false;
                     }
-                    mixer.route_stage(buffers, stage);
+                    mixer.route_stage_compensated(buffers, stage, &mut self.compensation);
                     continue;
                 }
                 let result: Result<(), PlaybackError> = pool.install(|| {
@@ -846,12 +960,36 @@ impl SongAudioEngine {
                 if result.is_err() {
                     return false;
                 }
-                mixer.route_stage(buffers, stage);
+                mixer.route_stage_compensated(buffers, stage, &mut self.compensation);
             }
             return true;
         }
         let audio = self.audio.channels_mut();
         let instruments = &mut self.instruments;
+        if self.compensation.enabled() {
+            for stage in 0..self.mixer.stages().len() {
+                for &index in &self.mixer.stages()[stage] {
+                    let buffer = &mut self.buffers[index];
+                    if process_rack(
+                        &mut audio[index],
+                        &mut instruments[index],
+                        &mut buffer.left,
+                        &mut buffer.right,
+                        context,
+                    )
+                    .is_err()
+                    {
+                        return false;
+                    }
+                }
+                self.mixer.route_stage_compensated(
+                    &mut self.buffers,
+                    stage,
+                    &mut self.compensation,
+                );
+            }
+            return true;
+        }
         self.mixer
             .mix(&mut self.buffers, |index, left, right| {
                 process_rack(
@@ -872,6 +1010,17 @@ impl AudioRenderer for SongAudioEngine {
     }
     fn render(&mut self, output: &mut [f32], channels: usize) {
         output.fill(0.0);
+        #[cfg(target_os = "android")]
+        {
+            if !crate::android::audio_active() {
+                if !self.android_paused {
+                    self.release_notes(false);
+                    self.android_paused = true;
+                }
+                return;
+            }
+            self.android_paused = false;
+        }
         if channels == 0 || self.render_ping(output, channels) {
             return;
         }
@@ -979,6 +1128,8 @@ impl AudioRenderer for SongAudioEngine {
         }
         (self.playing, self.clicked_beat) = (true, None);
         self.audio.reset_effects();
+        self.compensation.reset();
+        self.click_delay.reset();
         if self.rolling() {
             self.resync();
         }
@@ -1018,6 +1169,18 @@ impl AudioRenderer for SongAudioEngine {
     fn note_off(&mut self, channel: usize, key: u8) {
         self.live_key_up(channel, key);
     }
+    fn midi_note(&mut self, channel: usize, midi: u8, key: u8, velocity: Option<f32>) {
+        if key < 128 {
+            self.live_midi_key(channel, midi, key, velocity);
+        }
+    }
+    fn midi_controller(&mut self, channel: usize, midi: u8, index: usize, value: f32) {
+        if let Some(rows) = self.instruments.get_mut(channel) {
+            for (_, module) in rows {
+                module.instrument.set_midi_controller(midi, index, value);
+            }
+        }
+    }
 
     /// An [`Self::adopting`] engine takes over `old` as it replaces it: a song edit, which never rebuilds the sound
     /// ([`Self::merge`]). Any engine takes the sample preview playing. Runs on the audio thread and allocates nothing;
@@ -1026,6 +1189,13 @@ impl AudioRenderer for SongAudioEngine {
         self.preview = old.preview.take();
         self.take_input(old);
         if self.adopt {
+            if self.routing.ids == old.routing.ids
+                && self.mixer.same_routes(&old.mixer)
+                && self.compensation.maximum() == old.compensation.maximum()
+            {
+                std::mem::swap(&mut self.compensation, &mut old.compensation);
+                std::mem::swap(&mut self.click_delay, &mut old.click_delay);
+            }
             self.merge(old);
         }
     }
@@ -1102,6 +1272,8 @@ impl AudioRenderer for SongAudioEngine {
             clips.sampler.reset();
         }
         self.audio.reset_effects();
+        self.compensation.reset();
+        self.click_delay.reset();
     }
 
     /// A module setting by its panel `#n` key ([`settings`]): an instrument's goes to `Instrument::set_setting`, an
@@ -1184,7 +1356,17 @@ impl AudioRenderer for SongAudioEngine {
         let key = self.meter_keys[index];
         match key.instance_id {
             ..=0 => &[],
-            id => (self.audio.effect(key.channel, id)).map_or(&[], |effect| effect.analysis()),
+            id => {
+                if let Some((_, module)) = self
+                    .instruments
+                    .get(key.channel)
+                    .and_then(|rows| rows.iter().find(|(instance, _)| *instance == id))
+                {
+                    module.instrument.analysis()
+                } else {
+                    (self.audio.effect(key.channel, id)).map_or(&[], |effect| effect.analysis())
+                }
+            }
         }
     }
 
@@ -1545,25 +1727,50 @@ impl SongAudioEngine {
             self.sounding[channel] &= !uncovered;
             self.held_keys[channel] &= !uncovered;
             for row in 0..self.held[channel].len() {
+                let count = self.instruments[channel].len();
+                let address = row
+                    .checked_sub(count + 1)
+                    .map(|address| (address / 4, (address % 4) as u8));
+                let instrument_row = address.map_or(row, |(row, _)| row);
                 let id = self.instruments[channel]
-                    .get(row)
+                    .get(instrument_row)
                     .map_or(KIT, |(id, _)| *id);
                 for key in 0..=127 {
                     let k = usize::from(key);
                     let (held, covered) = (self.held[channel][row][k], self.cover[channel][row][k]);
-                    let starts = |action| match action {
-                        Action::NoteOn {
-                            instance_id,
-                            key: k,
-                            ..
-                        } => instance_id == id && k == key,
+                    let starts = |action| match (address, action) {
+                        (
+                            None,
+                            Action::NoteOn {
+                                instance_id,
+                                key: k,
+                                ..
+                            },
+                        ) => instance_id == id && k == key,
+                        (
+                            Some((_, source)),
+                            Action::MidiNote {
+                                instance_id,
+                                midi,
+                                key: k,
+                                velocity: Some(_),
+                                ..
+                            },
+                        ) => instance_id == id && k == key && midi == source,
                         _ => false,
                     };
                     if held > 0 && covered == 0 && !(now && self.starts_now(channel, starts)) {
-                        for _ in 0..held {
-                            match now {
-                                true => self.key_up(channel, Some(id), key),
-                                false => self.force_off(channel, id, key),
+                        if let Some((instrument, midi)) = address {
+                            self.instruments[channel][instrument]
+                                .1
+                                .instrument
+                                .note_off_midi(midi, key);
+                        } else {
+                            for _ in 0..held {
+                                match now {
+                                    true => self.key_up(channel, Some(id), key),
+                                    false => self.force_off(channel, id, key),
+                                }
                             }
                         }
                     }
@@ -1900,6 +2107,24 @@ fn hold(
         ) => (
             row(instance_id).and_then(|r| keys[channel][r].get_mut(usize::from(key))),
             up,
+        ),
+        (
+            Action::MidiNote {
+                instance_id,
+                key,
+                velocity,
+                midi,
+                ..
+            },
+            _,
+        ) => (
+            row(instance_id)
+                .and_then(|r| {
+                    keys[channel]
+                        .get_mut(instruments[channel].len() + 1 + r * 4 + usize::from(midi))
+                })
+                .and_then(|r| r.get_mut(usize::from(key))),
+            if velocity.is_some() { up } else { down },
         ),
         (Action::NoteOff { instance_id, key }, _) => (
             row(instance_id).and_then(|r| keys[channel][r].get_mut(usize::from(key))),

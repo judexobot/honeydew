@@ -32,6 +32,7 @@ pub(super) struct Now {
 
 #[derive(Default)]
 pub(super) struct NoteRecord {
+    pub(super) midi: Option<u8>,
     /// The live keys since the last frame, in order.
     pub(super) keys: Vec<Key>,
     /// A key was pressed while REC was armed and the transport stopped: it starts playback.
@@ -59,6 +60,12 @@ struct Take {
 }
 
 impl NoteRecord {
+    pub(super) fn for_midi(midi: u8) -> Self {
+        Self {
+            midi: Some(midi),
+            ..Self::default()
+        }
+    }
     /// Ends the take when the frame `now` ends it: Stop and seeks leave its open notes at length 0; the loop wrap
     /// closes them where the take last was; disarming and another current channel close them now. Whether the ended
     /// take recorded anything, which the app closes as one undo step before the next take records.
@@ -141,7 +148,10 @@ impl NoteRecord {
 
     /// The song was replaced: the take, the held keys and the queued ones were the old song's channels'.
     pub(super) fn forget(&mut self) {
-        *self = Self::default();
+        *self = Self {
+            midi: self.midi,
+            ..Self::default()
+        };
     }
 
     /// The channels or tracks moved (the app's re-key; `ids`: the channel ids before): the held and queued keys go with
@@ -214,7 +224,11 @@ impl NoteRecord {
             None => {
                 // A drum take's clip starts from the take's start.
                 let from = start(if drums { take.start } else { now.tick });
-                let (lane, id, new) = choose(ch, drums, from, now.lane, bar);
+                let (lane, id, new) = if self.midi.is_some() {
+                    choose_midi(ch, drums, from, now.lane, bar, self.midi)
+                } else {
+                    choose(ch, drums, from, now.lane, bar)
+                };
                 shifts.extend(new.map(|lane| LaneShift::new(now.channel, lane, true)));
                 self.shifted |= new.is_some();
                 (lane, id)
@@ -286,7 +300,11 @@ impl HoneydewApp {
         };
         // An automation take that ended this frame closes in the same step ([`Self::auto_record`]).
         let automation = std::mem::take(&mut self.auto_record.ended);
-        if self.note_record.end(&mut self.song, &now) | automation {
+        let mut ended = self.note_record.end(&mut self.song, &now) | automation;
+        for record in &mut self.midi_records {
+            ended |= record.end(&mut self.song, &now);
+        }
+        if ended {
             // A note take only adds notes, which are written as they play: no re-sync. An automation take's points
             // re-sync.
             let edit = if automation {
@@ -296,13 +314,21 @@ impl HoneydewApp {
             };
             self.song_edited(edit, tick);
         }
-        let Some(added) = self.note_record.record(&mut self.song, &now) else {
-            return;
-        };
-        self.rekey(&added);
-        // A take sets the song-changed flag while it records too.
-        self.files.song_changed();
-        self.song_edited(SongEdit::Ongoing, tick);
+        let mut changed = false;
+        if let Some(added) = self.note_record.record(&mut self.song, &now) {
+            self.rekey(&added);
+            changed = true;
+        }
+        for source in 0..4 {
+            if let Some(added) = self.midi_records[source].record(&mut self.song, &now) {
+                self.rekey(&added);
+                changed = true;
+            }
+        }
+        if changed {
+            self.files.song_changed();
+            self.song_edited(SongEdit::Ongoing, tick);
+        }
     }
 }
 
@@ -331,19 +357,39 @@ fn choose(
     current: Option<usize>,
     bar: u32,
 ) -> (usize, u32, Option<usize>) {
+    choose_midi(ch, drums, start, current, bar, None)
+}
+fn choose_midi(
+    ch: &mut Channel,
+    drums: bool,
+    start: u64,
+    current: Option<usize>,
+    bar: u32,
+    midi: Option<u8>,
+) -> (usize, u32, Option<usize>) {
     let covers = |c: &Clip| {
         let from = f64::from(c.start_tick);
         (from..from + c.visible_ticks()).contains(&(start as f64))
     };
-    let current = current.filter(|&l| !drums && ch.lanes.get(l).is_some_and(|l| notes(l, false)));
+    let current = current.filter(|&l| {
+        !drums
+            && ch.lanes.get(l).is_some_and(|l| {
+                notes(l, false) && midi.is_none_or(|m| l.midi_channel() == Some(m))
+            })
+    });
     let replaced = current.filter(|&l| {
         let clips = &mut ch.lanes[l].clips;
         let free = !clips.iter().any(|c| covers(c) && !c.events.is_empty());
         clips.retain(|c| !free || !covers(c));
         free
     });
-    let free = replaced
-        .or_else(|| (ch.lanes.iter()).position(|l| notes(l, drums) && !l.clips.iter().any(covers)));
+    let free = replaced.or_else(|| {
+        (ch.lanes.iter()).position(|l| {
+            notes(l, drums)
+                && midi.is_none_or(|m| l.midi_channel() == Some(m))
+                && !l.clips.iter().any(covers)
+        })
+    });
     let (lane, new) = match free {
         Some(lane) => (lane, None),
         None if drums => {
@@ -356,6 +402,9 @@ fn choose(
             (lane, Some(lane))
         }
     };
+    if midi.is_some() {
+        ch.lanes[lane].set_midi_channel(midi);
+    }
     let start = u32::try_from(start).unwrap_or(u32::MAX);
     (lane, ch.lanes[lane].add_clip(start, f64::from(bar)).id, new)
 }
@@ -499,6 +548,37 @@ mod tests {
                 })
             })
             .collect()
+    }
+
+    #[test]
+    fn four_apu_midi_sources_record_the_same_pitch_into_distinct_saved_lanes() {
+        let mut song = Song::default();
+        song.add_channel(ChannelKind::Synth(SynthKind::GameBoyApu));
+        let mut records: [_; 4] = std::array::from_fn(|i| NoteRecord::for_midi(i as u8));
+        for rec in &mut records {
+            frame(rec, &mut song, &now(1, 0), &[on(1, 60, 0.8)]);
+        }
+        assert_eq!(song.channels[1].lanes.len(), 5);
+        for (source, rec) in records.iter_mut().enumerate() {
+            let (channel, lane, _) = rec.clip(&song).unwrap();
+            assert_eq!(
+                song.channels[channel].lanes[lane].midi_channel(),
+                Some(source as u8)
+            );
+            frame(
+                rec,
+                &mut song,
+                &now(1, BEAT * (source as u64 + 1)),
+                &[off(1, 60)],
+            );
+        }
+        let copy = crate::flm::read(&crate::flm::write(&song).unwrap()).unwrap();
+        for (source, lane) in copy.channels[1].lanes.iter().skip(1).enumerate() {
+            assert_eq!(lane.midi_channel(), Some(source as u8));
+            assert!(
+                matches!(lane.clips[0].events[0], Event::Note { key: 60, len_beats, .. } if len_beats == source as f64 + 1.0)
+            );
+        }
     }
 
     #[test]

@@ -74,9 +74,6 @@ pub struct InputLink {
 
 impl Default for InputLink {
     fn default() -> Self {
-        #[cfg(target_os = "android")]
-        return Self::new(open_device);
-        #[cfg(not(target_os = "android"))]
         Self::new(open_device).listing(input_devices)
     }
 }
@@ -130,11 +127,11 @@ impl InputLink {
 
 /// The real opener: cpal natively, none on the web.
 pub fn open_device(device: Option<&str>, rate: u32) -> Result<Opened, String> {
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    #[cfg(not(target_arch = "wasm32"))]
     return honeydew_audio::input::open_input(device, rate)
         .map(|(ring, stream)| (ring, Box::new(stream) as Box<dyn Any>))
         .map_err(|err| format!("{err:?}"));
-    #[cfg(any(target_arch = "wasm32", target_os = "android"))]
+    #[cfg(target_arch = "wasm32")]
     {
         let _ = (device, rate);
         Err("Audio input is unavailable on this platform.".to_owned())

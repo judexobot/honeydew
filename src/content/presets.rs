@@ -54,6 +54,8 @@ fn banks() -> impl Iterator<Item = (u16, &'static [Preset])> {
         .chain(once((19, TRANSISTOR_BASS)))
         .chain(once((2, gm_synth::BANK)))
         .chain(once((39, three_osc::BANK)))
+        .chain(once((53, VOCALTUNE)))
+        .chain(once((54, GAMEBOY)))
 }
 
 /// The param `name` names in `spec`, as [`ModuleInstance::param`] indexes it: `#n` (digits only), or the one param or
@@ -746,3 +748,161 @@ const TRANSISTOR_BASS: &[Preset] = &[
 
 #[cfg(test)]
 mod tests;
+
+const VOCALTUNE: &[Preset] = &[
+    Preset {
+        category: "",
+        name: "Natural",
+        params: &[
+            ("Correction", 0.85),
+            ("Retune Speed", 0.4),
+            ("Humanize", 0.5),
+            ("Vibrato Preservation", 0.65),
+            ("Note Transition", 0.25),
+            ("Flex Tune", 0.3),
+        ],
+        settings: &[],
+    },
+    Preset {
+        category: "",
+        name: "Hard Tune",
+        params: &[
+            ("Hard Tune", 1.0),
+            ("Retune Speed", 0.0),
+            ("Humanize", 0.0),
+            ("Vibrato Preservation", 0.0),
+            ("Note Transition", 0.0),
+            ("Flex Tune", 0.0),
+            ("Deadband", 0.0),
+        ],
+        settings: &[],
+    },
+    Preset {
+        category: "",
+        name: "Vibrato",
+        params: &[
+            ("Correction", 0.9),
+            ("Retune Speed", 0.3),
+            ("Humanize", 0.65),
+            ("Vibrato Preservation", 1.0),
+            ("Flex Tune", 0.25),
+        ],
+        settings: &[],
+    },
+    Preset {
+        category: "",
+        name: "Gentle",
+        params: &[
+            ("Correction", 0.5),
+            ("Retune Speed", 0.65),
+            ("Humanize", 0.8),
+            ("Vibrato Preservation", 0.9),
+            ("Flex Tune", 0.5),
+            ("Quality", 1.0),
+        ],
+        settings: &[],
+    },
+];
+const GAMEBOY: &[Preset] = &[
+    Preset {
+        category: "Authentic",
+        name: "DMG Pulse Lead",
+        params: &[
+            ("Note Routing", 0.0),
+            ("CH2 On", 0.0),
+            ("CH3 On", 0.0),
+            ("CH1 Level", 1.0),
+        ],
+        settings: &[],
+    },
+    Preset {
+        category: "Authentic",
+        name: "DMG Hollow",
+        params: &[
+            ("Note Routing", 0.0),
+            ("CH1 Duty", 0.0),
+            ("CH2 On", 0.0),
+            ("CH3 On", 0.0),
+            ("CH1 Level", 1.0),
+        ],
+        settings: &[],
+    },
+    Preset {
+        category: "Authentic",
+        name: "DMG Sweep",
+        params: &[
+            ("Note Routing", 0.0),
+            ("CH2 On", 0.0),
+            ("CH3 On", 0.0),
+            ("Sweep Pace", 0.3),
+            ("Sweep Shift", 0.4),
+            ("Sweep Down", 1.0),
+            ("CH1 Level", 1.0),
+        ],
+        settings: &[],
+    },
+    Preset {
+        category: "Authentic",
+        name: "DMG Triangle Bass",
+        params: &[
+            ("Note Routing", 0.0),
+            ("CH1 On", 0.0),
+            ("CH2 On", 0.0),
+            ("Wave Level", 1.0 / 3.0),
+        ],
+        settings: &[],
+    },
+    Preset {
+        category: "Authentic",
+        name: "DMG Saw",
+        params: &[
+            ("Note Routing", 0.0),
+            ("CH1 On", 0.0),
+            ("CH2 On", 0.0),
+            ("Waveform", 1.0 / 3.0),
+        ],
+        settings: &[],
+    },
+    Preset {
+        category: "Authentic",
+        name: "DMG Noise Hat",
+        params: &[
+            ("Note Routing", 0.0),
+            ("CH1 On", 0.0),
+            ("CH2 On", 0.0),
+            ("CH3 On", 0.0),
+            ("CH4 On", 1.0),
+            ("Noise Level", 1.0),
+            ("CH4 Envelope Pace", 0.25),
+        ],
+        settings: &[],
+    },
+    Preset {
+        category: "Extended",
+        name: "APU Poly Keys",
+        params: &[
+            ("Mode", 1.0),
+            ("Note Routing", 0.0),
+            ("CH2 On", 0.0),
+            ("CH3 On", 0.0),
+            ("Output Gain", 0.9),
+            ("Extended Release", 0.2),
+        ],
+        settings: &[],
+    },
+    Preset {
+        category: "Extended",
+        name: "APU Stereo Pad",
+        params: &[
+            ("Mode", 1.0),
+            ("Note Routing", 0.0),
+            ("CH1 Extended Pan", 0.15),
+            ("CH2 Extended Pan", 0.85),
+            ("CH2 Transpose", 0.75),
+            ("CH3 On", 0.0),
+            ("Extended Release", 0.7),
+            ("Output Gain", 0.8),
+        ],
+        settings: &[],
+    },
+];

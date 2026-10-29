@@ -1,5 +1,8 @@
 //! Android's NativeActivity entry point and access to app-private storage and APK assets.
 
+pub(crate) mod microphone;
+pub(crate) mod midi;
+
 use std::ffi::CString;
 use std::io::Read;
 use std::path::PathBuf;
@@ -138,4 +141,24 @@ pub fn with_activity(
         let _ = env.exception_clear();
     }
     result
+}
+
+static AUDIO_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+static RESUMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn audio_active() -> bool {
+    AUDIO_ACTIVE.load(Ordering::Acquire)
+}
+pub fn take_resumed() -> bool {
+    RESUMED.swap(false, Ordering::AcqRel)
+}
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_daijro_honeydew_HoneydewActivity_onAudioActive(
+    _: jni::JNIEnv<'_>,
+    _: jni::objects::JClass<'_>,
+    active: jni::sys::jboolean,
+) {
+    let active = active != 0;
+    if !AUDIO_ACTIVE.swap(active, Ordering::AcqRel) && active {
+        RESUMED.store(true, Ordering::Release);
+    }
 }

@@ -20,6 +20,13 @@ pub(super) const KIT: i32 = 0;
 
 #[derive(Clone, Copy)]
 pub(super) enum Action {
+    MidiNote {
+        instance_id: i32,
+        midi: u8,
+        key: u8,
+        velocity: Option<f32>,
+        pan: f32,
+    },
     /// For the channel's instrument `instance_id` only, or its pad sampler for [`KIT`]: each has its own note list.
     NoteOn {
         instance_id: i32,
@@ -263,6 +270,47 @@ fn notes(
         }
         let instance_id = module.instance_id;
         if !instruments.iter().any(|(id, _)| *id == instance_id) {
+            continue;
+        }
+        if module.type_id == 54 {
+            let rack = note_rack(song, effects.clone(), sample_rate)?;
+            for source in [None, Some(0), Some(1), Some(2), Some(3)] {
+                let group =
+                    SongAudioBridge::note_events_for_midi(song, channel, 0.0, end_beat, source)
+                        .map_err(EngineError::Song)?;
+                if group.is_empty() {
+                    continue;
+                }
+                let group = rack
+                    .process_events(0.0, end_beat, f64::from(tempo_bpm), &group)
+                    .map_err(EngineError::Notes)?;
+                if let Some(midi) = source {
+                    for event in group {
+                        actions.push(ScheduledAction {
+                            frame: beat_frame(event.beat, sample_rate, tempo_bpm)?,
+                            channel,
+                            action: Action::MidiNote {
+                                instance_id,
+                                midi,
+                                key: u8::try_from(event.pitch)
+                                    .map_err(|_| EngineError::InvalidTiming)?,
+                                velocity: (event.kind == NoteKind::On)
+                                    .then_some(f32::from(event.velocity) / 255.0),
+                                pan: event.pan,
+                            },
+                        });
+                    }
+                } else {
+                    note_actions(
+                        &group,
+                        instance_id,
+                        channel,
+                        sample_rate,
+                        tempo_bpm,
+                        actions,
+                    )?;
+                }
+            }
             continue;
         }
         if stage.0 != effects.len() {

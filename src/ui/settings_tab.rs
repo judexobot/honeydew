@@ -207,14 +207,7 @@ const ROWS: [Row; 43] = {
     use Kind::*;
     [
         row("MIDI:", Header),
-        row(
-            "Input device:",
-            if cfg!(target_os = "android") {
-                FixedDropdown("Not available")
-            } else {
-                MidiDropdown
-            },
-        ),
+        row("Input device:", MidiDropdown),
         row("MIDI driver:", FixedDropdown("Standard")),
         row("Scan Bluetooth MIDI Devices", Scan),
         row("Audio:", Header),
@@ -613,7 +606,7 @@ impl SettingsTab {
                 if latency && s.latency_compensation == Some(false) {
                     let at = right(CALIBRATE_W, BUTTON_H);
                     let b = Button::new(id.with("calibrate"), at, "Calibrate", false, colors);
-                    self.calibrate |= button(ui, cx, &b, !cfg!(target_os = "android")).clicked();
+                    self.calibrate |= button(ui, cx, &b, true).clicked();
                 }
                 let (on, field) = match row.kind {
                     Kind::Toggle(field) => (*field(s), Some(field)),

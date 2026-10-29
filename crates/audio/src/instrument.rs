@@ -18,6 +18,20 @@ pub trait Instrument: Send {
     fn note_on(&mut self, key: u8, velocity: f32, pan: f32);
     /// Releases a sounding `key`.
     fn note_off(&mut self, key: u8);
+    /// MIDI channel-preserving entry points. Existing instruments remain omni.
+    fn note_on_midi(&mut self, _midi: u8, key: u8, velocity: f32, pan: f32) {
+        self.note_on(key, velocity, pan);
+    }
+    fn note_off_midi(&mut self, _midi: u8, key: u8) {
+        self.note_off(key);
+    }
+    fn set_midi_controller(&mut self, _midi: u8, index: usize, value: f32) {
+        self.set_controller(index, value);
+    }
+    /// A fixed, preallocated telemetry slab, empty for instruments without analysis.
+    fn analysis(&self) -> &[f32] {
+        &[]
+    }
     /// Releases every voice; their releases still sound (Stop).
     fn all_notes_off(&mut self);
     /// Silences at once: voices, delay lines and modulation phases are cleared, params kept (Enable switched off).
@@ -116,6 +130,7 @@ pub struct InstrumentModule {
     left: Vec<f32>,
     right: Vec<f32>,
     meter: MeterSnapshot,
+    delay: crate::latency::StereoDelay,
     /// The `ADD1` key range, both bounds inclusive. Full by default.
     pub keys: (u8, u8),
     /// Its key-learn is active (`Set Range` waits for a key): it hears no notes.
@@ -137,6 +152,7 @@ impl InstrumentModule {
             left: vec![0.0; max_block.max(1)],
             right: vec![0.0; max_block.max(1)],
             meter: MeterSnapshot::default(),
+            delay: crate::latency::StereoDelay::new(0),
             keys: (0, 127),
             learning: false,
             effects_above: 0,
@@ -144,6 +160,13 @@ impl InstrumentModule {
         }
     }
 
+    /// Reserve route-alignment storage before this module enters the callback.
+    pub fn prepare_latency(&mut self, maximum: usize) {
+        self.delay = crate::latency::StereoDelay::new(maximum);
+    }
+    pub fn set_latency(&mut self, delay: usize) {
+        self.delay.set_delay(delay);
+    }
     /// Whether note `key`, on or off, reaches the instrument: inside its key range while it is not learning one.
     /// The per-module octave shift that would add 12·shift after this check is always
     /// 0, so keys pass unchanged.
@@ -171,6 +194,7 @@ impl InstrumentModule {
                     let enabled = value >= 0.5;
                     if self.enabled && !enabled && !self.instrument.freezes_when_disabled() {
                         self.instrument.reset();
+                        self.delay.reset();
                     }
                     self.enabled = enabled;
                 }
@@ -215,6 +239,7 @@ impl InstrumentModule {
             wet_l.fill(0.0);
             wet_r.fill(0.0);
             self.instrument.process(wet_l, wet_r, context);
+            self.delay.process(wet_l, wet_r);
             // Post Gain, Mix and Wet Pan apply only while some signal is present: a part where the
             // instrument and the buffer are both exact silence stays 0 and their smoothing holds.
             let signals = [&*wet_l, &*wet_r, &*out_l, &*out_r];

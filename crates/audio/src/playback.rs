@@ -353,6 +353,25 @@ impl AudioPlayback {
 }
 
 impl PlaybackChannel {
+    /// Only the new VocalTune delay is introduced into existing projects' routing.
+    pub fn vocal_latency_before(&self, end: usize) -> usize {
+        self.effects
+            .iter()
+            .take(end)
+            .filter(|e| e.effect.type_id() == 53)
+            .map(|e| e.effect.latency_samples())
+            .sum()
+    }
+    pub fn maximum_vocal_latency(&self) -> usize {
+        self.effects
+            .iter()
+            .filter_map(|e| match &e.effect.processor {
+                crate::Processor::VocalTune(v) => Some(v.maximum_latency_samples()),
+                _ => None,
+            })
+            .sum()
+    }
+
     /// The effects at positions `effects` in this channel's rack.
     pub fn process_effects(
         &mut self,

@@ -392,6 +392,7 @@ struct Pass {
     block: Vec<f32>,
     /// Frames rendered.
     done: usize,
+    engine_done: usize,
     range: usize,
     tail: usize,
     /// Frames to render: the last block may run past it.
@@ -400,11 +401,28 @@ struct Pass {
 }
 
 impl Pass {
-    fn new(engine: SongAudioEngine, range: usize, tail: usize, end: usize, hq: bool) -> Self {
+    fn new(mut engine: SongAudioEngine, range: usize, tail: usize, end: usize, hq: bool) -> Self {
+        let mut block = vec![0.0; 2 * BLOCK];
+        let latency = engine.output_latency_samples();
+        let mut engine_done = 0;
+        while engine_done < latency {
+            if engine_done == range {
+                engine.halt();
+            }
+            let until_end = if engine_done < range {
+                range - engine_done
+            } else {
+                usize::MAX
+            };
+            let frames = (latency - engine_done).min(BLOCK).min(until_end);
+            engine.render(&mut block[..frames * 2], 2);
+            engine_done += frames;
+        }
         Self {
             engine,
-            block: vec![0.0; 2 * BLOCK],
+            block,
             done: 0,
+            engine_done,
             range,
             tail,
             end,
@@ -418,7 +436,7 @@ impl Pass {
         if self.ended() {
             return None;
         }
-        if done == self.range {
+        if self.engine_done == self.range {
             self.engine.halt();
         }
         let stop = if done < self.range {
@@ -426,7 +444,12 @@ impl Pass {
         } else {
             self.range + self.tail
         };
-        let frames = (stop - done).min(BLOCK);
+        let until_halt = if self.engine_done < self.range {
+            self.range - self.engine_done
+        } else {
+            usize::MAX
+        };
+        let frames = (stop - done).min(BLOCK).min(until_halt);
         let block = &mut self.block[..2 * frames];
         self.engine.render(block, 2);
         for (frame, f) in block.as_chunks_mut::<2>().0.iter_mut().zip(done..) {
@@ -435,6 +458,7 @@ impl Pass {
             }
         }
         self.done += frames;
+        self.engine_done += frames;
         Some((done, block))
     }
 

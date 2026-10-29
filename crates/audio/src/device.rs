@@ -76,6 +76,14 @@ pub trait AudioRenderer: Send + 'static {
     fn seek(&mut self, tick: u64);
     fn note_on(&mut self, channel: usize, key: u8, velocity: f32);
     fn note_off(&mut self, channel: usize, key: u8);
+    fn midi_note(&mut self, channel: usize, _midi: u8, key: u8, velocity: Option<f32>) {
+        if let Some(v) = velocity {
+            self.note_on(channel, key, v);
+        } else {
+            self.note_off(channel, key);
+        }
+    }
+    fn midi_controller(&mut self, _channel: usize, _midi: u8, _index: usize, _value: f32) {}
     /// Loops the transport over song ticks [start, end) while playing: a playhead reaching or past the end goes on
     /// from the start, sample-accurately. `None`, or an empty or inverted range, plays on unlooped.
     fn set_loop(&mut self, range: Option<(u64, u64)>);
@@ -144,6 +152,18 @@ pub trait AudioRenderer: Send + 'static {
 }
 
 pub enum AudioCommand<R> {
+    MidiNote {
+        channel: usize,
+        midi: u8,
+        key: u8,
+        velocity: Option<f32>,
+    },
+    MidiController {
+        channel: usize,
+        midi: u8,
+        index: usize,
+        value: f32,
+    },
     SetMultiCore(bool),
     SetParam {
         channel: usize,
@@ -794,6 +814,18 @@ impl<R: AudioRenderer> CallbackState<R> {
                     self.replace(renderer, meters);
                 }
                 CallbackCommand::Control(command) => match command {
+                    AudioCommand::MidiNote {
+                        channel,
+                        midi,
+                        key,
+                        velocity,
+                    } => self.renderer.midi_note(channel, midi, key, velocity),
+                    AudioCommand::MidiController {
+                        channel,
+                        midi,
+                        index,
+                        value,
+                    } => self.renderer.midi_controller(channel, midi, index, value),
                     AudioCommand::SetMultiCore(on) => self.renderer.set_multi_core(on),
                     AudioCommand::SetParam {
                         channel,

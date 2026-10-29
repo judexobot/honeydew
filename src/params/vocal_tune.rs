@@ -47,6 +47,22 @@ const PARAMETERS: &[P] = &[
         0.75,
         Display::linear(0.0, 100.0, 0, "%"),
     ), // 24
+    P::toggle("Formant Preserve", 1.0), // 25
+    P::cont("Formant Shift", 0.5, Display::linear(-12.0, 12.0, 1, " st")), // 26
+    P::cont(
+        "Vibrato Preservation",
+        0.35,
+        Display::linear(0.0, 100.0, 0, "%"),
+    ), // 27
+    P::cont(
+        "Note Transition",
+        0.15,
+        Display::linear(0.0, 100.0, 0, " ms"),
+    ), // 28
+    P::cont("Flex Tune", 0.1, Display::linear(0.0, 100.0, 0, " cents")), // 29
+    P::menu("Input Range", 0.0, &["Full", "Low", "Medium", "High"]), // 30
+    P::cont("Output Gain", 0.5, Display::linear(-24.0, 24.0, 1, " dB")), // 31
+    P::menu("Quality", 0.0, &["Monitor", "Studio"]), // 32
 ];
 pub static MODULES: &[ModuleSpec] = &[ModuleSpec::effect(
     53,

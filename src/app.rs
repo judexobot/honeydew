@@ -186,6 +186,7 @@ pub struct HoneydewApp {
     auto_record: auto_record::AutoRecord,
     /// REC's live notes and drum hits ([`note_record`]).
     note_record: note_record::NoteRecord,
+    midi_records: [note_record::NoteRecord; 4],
     /// The audio input: one device, open while something needs it ([`Self::open_input`]).
     input: InputLink,
     /// The input failed to open since what needs it last changed ([`Self::input_need`]) or an `Audio Record` channel
@@ -286,6 +287,9 @@ impl Default for HoneydewApp {
             automated: Vec::new(),
             auto_record: Default::default(),
             note_record: Default::default(),
+            midi_records: std::array::from_fn(|source| {
+                note_record::NoteRecord::for_midi(source as u8)
+            }),
             // Tests never open a device: a rig that records hands in a fake opener.
             #[cfg(not(test))]
             input: InputLink::default(),
@@ -634,6 +638,9 @@ impl HoneydewApp {
                 self.main_screen.armed = false;
                 self.auto_record.stop();
                 self.note_record.forget();
+                for record in &mut self.midi_records {
+                    record.forget();
+                }
                 // A recording's files stay, closed as they are (they load); their clips were the old song's.
                 self.recorder = None;
                 self.audio.send(AudioCommand::Stop);
@@ -736,7 +743,18 @@ impl HoneydewApp {
             self.preview = None;
         }
         // A take's clip stays out of playback while it records.
-        let song = solo.or_else(|| self.note_record.without_take(&self.song));
+        let previewing = solo.is_some();
+        let mut song = solo.or_else(|| self.note_record.without_take(&self.song));
+        if !previewing {
+            for record in &self.midi_records {
+                if let Some((channel, lane, id)) = record.clip(&self.song) {
+                    let copy = song.get_or_insert_with(|| self.song.clone());
+                    copy.channels[channel].lanes[lane]
+                        .clips
+                        .retain(|clip| clip.id != id);
+                }
+            }
+        }
         let song = song.as_ref().unwrap_or(&self.song);
         let read = sample_cache::reader(&self.files);
         // A new engine reads its loop from that song.
@@ -1077,9 +1095,18 @@ impl HoneydewApp {
         let midi = (self.midi.snapped.iter())
             .filter(|s| s.0 == channel)
             .map(|s| s.2);
-        (touched.chain(self.typed.notes(channel)).chain(midi))
-            .filter(|&k| k < 128 && !self.cut.contains(&(channel, k)))
-            .fold(0, |bits, k| bits | 1_u128 << k)
+        let mapped = self
+            .midi
+            .router
+            .held_midi()
+            .filter(|(_, c)| *c == channel)
+            .map(|(key, _)| key);
+        (touched
+            .chain(self.typed.notes(channel))
+            .chain(midi)
+            .chain(mapped))
+        .filter(|&k| k < 128 && !self.cut.contains(&(channel, k)))
+        .fold(0, |bits, k| bits | 1_u128 << k)
     }
 
     /// Play start cut every live key held: each goes dark until let go, and its release then sends a note-off with no
@@ -1097,6 +1124,9 @@ impl HoneydewApp {
         }
         let cut = &self.cut;
         (self.note_record.held).retain(|h| !cut.contains(&(h.0, h.1)));
+        for record in &mut self.midi_records {
+            record.held.retain(|h| !cut.contains(&(h.0, h.1)));
+        }
     }
 
     /// The keyboard is a piano: the current channel's first lane is an automation lane, or the chosen kind (the
@@ -1551,7 +1581,24 @@ impl HoneydewApp {
             self.input_failed = false;
             self.input_need = need;
         }
-        if !wanted {
+        #[cfg(target_os = "android")]
+        let permission_waiting = wanted && !crate::android::microphone::ready();
+        #[cfg(not(target_os = "android"))]
+        let permission_waiting = false;
+        #[cfg(target_os = "android")]
+        if permission_waiting {
+            crate::android::microphone::request();
+            if crate::android::microphone::denied() && !self.input_failed {
+                self.input_failed = true;
+                self.navigate(Nav::Open(Overlay::Message {
+                    tag: INPUT_TAG,
+                    lines: vec![MIC_PERMISSION.into()],
+                    confirm: None,
+                    extra: None,
+                }));
+            }
+        }
+        if !wanted || permission_waiting {
             self.input.close();
         } else if let Some(rate) = self.audio.sample_rate().filter(|_| !self.input_failed)
             && self.input.open(device.as_deref(), rate).is_err()
@@ -1561,7 +1608,8 @@ impl HoneydewApp {
                 self.navigate(Nav::Open(Overlay::Message {
                     tag: INPUT_TAG,
                     lines: vec![if cfg!(target_os = "android") {
-                        "Audio recording is not available in this Android preview.".into()
+                        "Could not open microphone. Check permission and the selected audio device."
+                            .into()
                     } else {
                         MIC_PERMISSION.into()
                     }],
@@ -1650,7 +1698,9 @@ impl HoneydewApp {
             let channel = channels.iter().position(|c| c.id == id)?;
             Some((channel, lane, clip))
         });
-        let clips = (self.note_record.clip(&self.song).into_iter()).chain(auto);
+        let clips = (self.note_record.clip(&self.song).into_iter())
+            .chain(self.midi_records.iter().filter_map(|r| r.clip(&self.song)))
+            .chain(auto);
         let mut takes: Vec<LiveTake> = clips
             .filter_map(|(channel, lane, id)| {
                 let lane_clips = &channels[channel].lanes.get(lane)?.clips;

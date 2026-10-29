@@ -786,6 +786,10 @@ impl Reader {
                         self.charge(4 * values.len(), &child.path)?;
                         module.params = values;
                     } else {
+                        // The original fork layered all four channels. New parameters are append-only.
+                        if type_id == 54 && values.len() <= 22 {
+                            module.params[honeydew_audio::gameboy_instrument::ROUTING] = 0.0;
+                        }
                         for (param, value) in module.params.iter_mut().zip(values) {
                             *param = value;
                         }

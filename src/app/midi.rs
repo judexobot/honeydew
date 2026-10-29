@@ -43,6 +43,8 @@ pub(super) struct Midi {
     /// Each MIDI key sounding, as (channel, controller key, the key it plays under key-lock): its note-off ends that
     /// key, whatever the lock or the current channel has become since (as a typed key's release).
     pub(super) snapped: Vec<(usize, u8, u8)>,
+    fresh_mapped: Vec<(usize, u8, u8)>,
+    pub(super) gated_mapped: Vec<(f64, usize, u8, u8)>,
 }
 
 impl Default for Midi {
@@ -55,6 +57,8 @@ impl Default for Midi {
             reopened: 0,
             linked_at: None,
             snapped: Vec::new(),
+            fresh_mapped: Vec::new(),
+            gated_mapped: Vec::new(),
         }
     }
 }
@@ -87,6 +91,25 @@ impl HoneydewApp {
     /// `hidden`: the web page was hidden since the last frame. What the device sent meanwhile is dropped, not played
     /// late in a burst: the hide released every key, and a linked move would be an edit nobody made.
     pub(super) fn midi_input(&mut self, ctx: &egui::Context, hidden: bool, tick: u64) {
+        #[cfg(target_os = "android")]
+        let hidden = hidden || crate::android::take_resumed();
+        self.midi.fresh_mapped.clear();
+        let audio = &mut self.audio;
+        let now = self.now;
+        self.midi.gated_mapped.retain(|&(at, channel, midi, key)| {
+            if now >= at {
+                audio.send(AudioCommand::MidiNote {
+                    channel,
+                    midi,
+                    key,
+                    velocity: None,
+                });
+                false
+            } else {
+                ctx.request_repaint_after_secs((at - now) as f32);
+                true
+            }
+        });
         let device = self.midi_device();
         let midi = &mut self.midi;
         let open = if midi.opened {
@@ -120,7 +143,22 @@ impl HoneydewApp {
         };
         let mut linked = false;
         for msg in messages.iter().filter_map(|m| MidiMsg::parse(m)) {
-            let mut outs = self.midi.router.route(msg, self.selected_channel, &links);
+            let mapped =
+                self.song
+                    .channels
+                    .get(self.selected_channel)
+                    .is_some_and(|c| {
+                        c.rack.modules.iter().any(|m| {
+                            m.type_id == 54 && m.params.get(23).copied().unwrap_or(0.0) > 0.75
+                        })
+                    });
+            let mut outs = if mapped {
+                self.midi
+                    .router
+                    .route_midi(msg, self.selected_channel, &links)
+            } else {
+                self.midi.router.route(msg, self.selected_channel, &links)
+            };
             // The learned key plays after its edit rebuilds the engine, so it sounds with its pad.
             outs.sort_by_key(|out| !matches!(out, Out::LearnedNote(_)));
             for out in outs {
@@ -131,6 +169,9 @@ impl HoneydewApp {
                     links = song_links(&self.song);
                 }
             }
+        }
+        for &(at, _, _, _) in &self.midi.gated_mapped {
+            ctx.request_repaint_after_secs((at - self.now).max(0.0) as f32);
         }
         if linked {
             self.midi.linked_at = Some(self.now);
@@ -163,6 +204,76 @@ impl HoneydewApp {
     /// Executes one router output. Whether it was a linked param's move.
     fn midi_out(&mut self, out: Out, tick: u64) -> bool {
         match out {
+            Out::MidiNote {
+                channel,
+                midi,
+                key,
+                on,
+                velocity,
+            } => {
+                if channel != 0 {
+                    if on {
+                        let audio = &mut self.audio;
+                        self.midi.gated_mapped.retain(|&(_, c, m, k)| {
+                            if (c, m, k) == (channel, midi, key) {
+                                audio.send(AudioCommand::MidiNote {
+                                    channel,
+                                    midi,
+                                    key,
+                                    velocity: None,
+                                });
+                                false
+                            } else {
+                                true
+                            }
+                        });
+                        self.midi.fresh_mapped.push((channel, midi, key));
+                        self.audio.send(AudioCommand::MidiNote {
+                            channel,
+                            midi,
+                            key,
+                            velocity: Some(velocity),
+                        });
+                    } else if self.midi.fresh_mapped.contains(&(channel, midi, key)) {
+                        self.midi.gated_mapped.push((
+                            self.now + super::TAP_GATE,
+                            channel,
+                            midi,
+                            key,
+                        ));
+                    } else {
+                        self.audio.send(AudioCommand::MidiNote {
+                            channel,
+                            midi,
+                            key,
+                            velocity: None,
+                        });
+                    }
+                    if on {
+                        self.slots.rack.key_played(channel, key);
+                    }
+                    self.note_record.start |=
+                        on && self.main_screen.armed && !self.main_screen.playing;
+                    if let Some(record) = self.midi_records.get_mut(midi as usize) {
+                        record.keys.push((channel, key, on.then_some(velocity)));
+                    }
+                }
+            }
+            Out::MidiControl {
+                channel,
+                midi,
+                index,
+                value,
+            } => {
+                if channel != 0 {
+                    self.audio.send(AudioCommand::MidiController {
+                        channel,
+                        midi,
+                        index: index.max(0) as usize,
+                        value,
+                    });
+                }
+            }
             Out::Note { channel: 0, .. } | Out::ChannelParam { channel: 0, .. } => {}
             Out::Note {
                 channel,

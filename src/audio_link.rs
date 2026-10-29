@@ -305,6 +305,8 @@ impl AudioLink {
         let live = matches!(
             cmd,
             AudioCommand::NoteOn { .. }
+                | AudioCommand::MidiNote { .. }
+                | AudioCommand::MidiController { .. }
                 | AudioCommand::NoteOff { .. }
                 | AudioCommand::LiveParam { .. }
         ) || matches!(cmd, AudioCommand::SetParam { instance_id: 0, index, .. } if controller(index));
@@ -441,7 +443,13 @@ impl AudioLink {
     /// The keys whose press waits for the next Play ([`Self::hold_notes`]), as (channel, key).
     pub fn waiting_presses(&self) -> impl Iterator<Item = (usize, u8)> + '_ {
         (self.waiting.iter().flatten()).filter_map(|cmd| match *cmd {
-            AudioCommand::NoteOn { channel, key, .. } => Some((channel, key)),
+            AudioCommand::NoteOn { channel, key, .. }
+            | AudioCommand::MidiNote {
+                channel,
+                key,
+                velocity: Some(_),
+                ..
+            } => Some((channel, key)),
             _ => None,
         })
     }
@@ -901,6 +909,18 @@ pub(crate) mod testing {
 
     fn describe(cmd: &Command) -> String {
         match cmd {
+            AudioCommand::MidiNote {
+                channel,
+                midi,
+                key,
+                velocity,
+            } => format!("MidiNote {channel} {midi} {key} {velocity:?}"),
+            AudioCommand::MidiController {
+                channel,
+                midi,
+                index,
+                value,
+            } => format!("MidiController {channel} {midi} {index} {value}"),
             AudioCommand::NoteOn {
                 channel,
                 key,
@@ -992,6 +1012,24 @@ pub(crate) mod testing {
                 (AudioCommand::Seek(tick), Some(engine)) => engine.seek(tick),
                 (AudioCommand::ResetSound, Some(engine)) => engine.reset_sound(),
                 (AudioCommand::SetLoop(range), Some(engine)) => engine.set_loop(range),
+                (
+                    AudioCommand::MidiNote {
+                        channel,
+                        midi,
+                        key,
+                        velocity,
+                    },
+                    Some(engine),
+                ) => engine.midi_note(channel, midi, key, velocity),
+                (
+                    AudioCommand::MidiController {
+                        channel,
+                        midi,
+                        index,
+                        value,
+                    },
+                    Some(engine),
+                ) => engine.midi_controller(channel, midi, index, value),
                 (AudioCommand::CountIn(beats), Some(engine)) => engine.count_in(beats),
                 (AudioCommand::Metronome { on, level }, Some(engine)) => {
                     engine.set_metronome(on, level)

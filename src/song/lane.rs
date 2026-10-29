@@ -92,6 +92,27 @@ pub struct Lane {
 }
 
 impl Lane {
+    /// Optional channel-voice destination, stored as a forward-compatible MCHN v1 chunk.
+    pub fn midi_channel(&self) -> Option<u8> {
+        self.file.unknown_chunks.iter().find_map(|chunk| {
+            (chunk.id == *b"MCHN"
+                && chunk.payload.len() == 2
+                && chunk.payload[0] == 1
+                && chunk.payload[1] < 16)
+                .then(|| chunk.payload[1])
+        })
+    }
+    pub fn set_midi_channel(&mut self, channel: Option<u8>) {
+        self.file
+            .unknown_chunks
+            .retain(|chunk| !(chunk.id == *b"MCHN" && chunk.payload.first() == Some(&1)));
+        if let Some(channel) = channel.filter(|c| *c < 16) {
+            self.file.unknown_chunks.push(super::file::RawChunk {
+                id: *b"MCHN",
+                payload: vec![1, channel],
+            });
+        }
+    }
     /// An empty lane without a target or label.
     pub fn new(kind: LaneKind) -> Self {
         Self {
