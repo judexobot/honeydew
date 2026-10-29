@@ -91,7 +91,7 @@ impl Probe {
             24 => (Kind::Tuner(Box::new(Detector::new(sample_rate))), 2),
             25 => (Kind::Pitcher, 2),
             45 => (Kind::Pitcher2, 2),
-            53 => (Kind::VocalTune, 3),
+            53 => (Kind::VocalTune, 4),
             26 => (
                 Kind::Analyzer(Box::new(Analyzer::new(sample_rate))),
                 analyzer::LEN,
@@ -219,6 +219,7 @@ impl Probe {
                 slab[0] = state.detected_hz().unwrap_or(0.0);
                 slab[1] = state.target_midi().map_or(-1.0, |n| n as f32);
                 slab[2] = state.ratio();
+                slab[3] = state.clarity();
             }
             _ => {}
         }
@@ -666,9 +667,11 @@ pub fn pitcher(slab: &[f32]) -> Option<(f32, Option<usize>)> {
 }
 
 /// Pitcher 2: the detected and target pitches, Hz (0: none).
-pub fn vocal_tune(slab: &[f32]) -> Option<(f32, Option<i32>, f32)> {
+pub fn vocal_tune(slab: &[f32]) -> Option<(f32, Option<i32>, f32, f32)> {
     match slab {
-        &[hz, midi, ratio] => Some((hz, (midi >= 0.0).then_some(midi as i32), ratio)),
+        &[hz, midi, ratio, clarity] => {
+            Some((hz, (midi >= 0.0).then_some(midi as i32), ratio, clarity))
+        }
         _ => None,
     }
 }
