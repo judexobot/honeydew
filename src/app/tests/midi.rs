@@ -1001,5 +1001,8 @@ fn hiding_the_app_releases_a_mapped_apu_tap_before_its_gate_expires() {
     rig.app.on_hidden();
     assert!(rig.app.midi.gated_mapped.is_empty());
     let log = rig.take();
-    assert!(log.iter().any(|entry| entry == "MidiNote 1 0 60 None"), "{log:?}");
+    assert!(
+        log.iter().any(|entry| entry == "MidiNote 1 0 60 None"),
+        "{log:?}"
+    );
 }

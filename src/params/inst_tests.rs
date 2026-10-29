@@ -244,7 +244,11 @@ fn rows_names_defaults_and_kinds() {
         }
     }
     // Every instrument param but the SoundFont Player's has a row.
-    let tabled: usize = OVERVIEW.iter().filter(|o| o.0 != 52 && o.0 != 54).map(|o| o.3).sum();
+    let tabled: usize = OVERVIEW
+        .iter()
+        .filter(|o| o.0 != 52 && o.0 != 54)
+        .map(|o| o.3)
+        .sum();
     assert_eq!(ROWS.len(), tabled);
     for &(id, idx, want) in KIND_NOTES {
         let row = ROWS.iter().find(|r| (r.0, r.1) == (id, idx));
