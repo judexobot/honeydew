@@ -98,7 +98,7 @@ pub fn effect_info(id: u16) -> Option<EffectInfo> {
         44 => ("Spreader", 5),
         45 => ("Pitcher 2", 27),
         46 => ("Tremolo", 12),
-        53 => ("VocalTune", 12),
+        53 => ("VocalTune", 25),
         lemon::REVERB => ("Lemon Reverb", lemon::REVERB_MID_SIDE + 1),
         lemon::LIMITER => ("Lemon Limiter", lemon::LIMITER_SAFETY + 1),
         _ => return None,
@@ -461,7 +461,8 @@ impl AudioEffect {
                 Processor::Tremolo(TremoloState::default()),
             ),
             53 => {
-                let params = vec![1.0, 0.0, 0.0, 1.0, 0.25, 1.0, 0.2, 0.5, 0.1, 0.5, 0.0, 0.5];
+                let params = vec![1.0, 0.0, 0.0, 1.0, 0.25, 1.0, 0.2, 0.5, 0.1, 0.5, 0.0, 0.5,
+                    1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.75];
                 let rate = sample_rate as u32;
                 if (rate as f32 - sample_rate).abs() > 0.001 {
                     return Err(EffectError::InvalidSampleRate);
@@ -903,11 +904,12 @@ impl Processor {
             }
             Self::VocalTune(state) => {
                 let root = (params[1] * 11.0).round() as u8;
-                let scale = match (params[2] * 4.0).round() as u8 {
+                let scale = match (params[2] * 5.0).round() as u8 {
                     1 => vocal_tune::Scale::Major,
                     2 => vocal_tune::Scale::Minor,
                     3 => vocal_tune::Scale::Pentatonic,
                     4 => vocal_tune::Scale::Blues,
+                    5 => vocal_tune::Scale::Custom,
                     _ => vocal_tune::Scale::Chromatic,
                 };
                 state.set_parameters(vocal_tune::Parameters {
@@ -922,6 +924,10 @@ impl Processor {
                     reference_hz: 430.0 + 20.0 * params[9],
                     hard_tune: params[10] >= 0.5,
                     detune_cents: -50.0 + 100.0 * params[11],
+                    custom_notes: (0..12).fold(0u16, |mask, n| {
+                        if params[12 + n] >= 0.5 { mask | (1u16 << n) } else { mask }
+                    }),
+                    protect_sibilants: params[24],
                 });
             }
             Self::Comb(state) => state.refresh(params, sample_rate),
