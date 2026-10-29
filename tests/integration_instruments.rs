@@ -232,10 +232,22 @@ fn all_thirteen_gen_presets_roundtrip_and_render_real_audio() {
         let peak = audio.iter().map(|x| x.abs()).fold(0.0, f32::max);
         println!("{name}: peak {:.1} dBFS", 20.0 * peak.max(1e-9).log10());
         assert!(peak > 0.01 && peak < 0.99, "{name}: peak {peak}");
+        // PSG patches can differ in the independent B/C hardware channel levels.
+        // Exercise all three tone channels as well as the single-note audition.
+        engine.note_on(1, 52, 0.8);
+        engine.note_on(1, 55, 0.8);
+        audio.fill(0.0);
+        engine.render(&mut audio, 2);
+        assert!(
+            audio.iter().all(|x| x.is_finite() && x.abs() < 0.99),
+            "{name}: chord clips"
+        );
         hashes.insert(audio.iter().fold(0u64, |hash, x| {
             hash.wrapping_mul(31) ^ u64::from(x.to_bits())
         }));
         engine.note_off(1, 48);
+        engine.note_off(1, 52);
+        engine.note_off(1, 55);
         audio.fill(0.0);
         engine.render(&mut audio, 2);
         assert!(audio.iter().all(|x| x.is_finite()));

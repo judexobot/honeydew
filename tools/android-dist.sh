@@ -37,6 +37,12 @@ cat sounds/honeydew-sounds.zip.[0-9][0-9][0-9] > "$HONEYDEW_ANDROID_BUILD_DIR/so
 rm -rf "$HONEYDEW_ANDROID_BUILD_DIR/assets/content"
 unzip -q "$HONEYDEW_ANDROID_BUILD_DIR/sounds.zip" 'content/*' -x '*.gz' -d "$HONEYDEW_ANDROID_BUILD_DIR/assets"
 rm "$HONEYDEW_ANDROID_BUILD_DIR/sounds.zip"
+# Ship the licenses and immutable corresponding-source location with the debug APK.
+mkdir -p "$HONEYDEW_ANDROID_BUILD_DIR/assets/licenses"
+cp LICENSE "$HONEYDEW_ANDROID_BUILD_DIR/assets/licenses/Honeydew-LICENSE.txt"
+cp THIRD_PARTY_NOTICES.md "$HONEYDEW_ANDROID_BUILD_DIR/assets/licenses/THIRD_PARTY_NOTICES.md"
+cp vendor/nuked-opn2/LICENSE "$HONEYDEW_ANDROID_BUILD_DIR/assets/licenses/Nuked-OPN2-LICENSE.txt"
+printf 'Corresponding source: https://github.com/judexobot/honeydew/tree/%s\n' "$(git rev-parse HEAD)" > "$HONEYDEW_ANDROID_BUILD_DIR/assets/licenses/SOURCE.txt"
 # signalsmith-stretch's C++ links libc++_shared.so, which the APK has to ship beside libhoneydew.so.
 cargo ndk -t arm64-v8a --platform 26 --link-libcxx-shared -o "$HONEYDEW_ANDROID_BUILD_DIR/jniLibs" rustc --release --locked --lib -- -C link-arg=-Wl,-z,max-page-size=16384
 debug_keystore=$PWD/android/debug.keystore
@@ -66,6 +72,8 @@ with zipfile.ZipFile(sys.argv[1]) as apk:
     for lib in ('libhoneydew.so', 'libc++_shared.so'):
         assert apk.getinfo('lib/arm64-v8a/' + lib).compress_type == zipfile.ZIP_STORED, lib
     assert apk.read('assets/content/CREDITS.txt'), 'missing sound credits'
+    assert apk.read('assets/licenses/Nuked-OPN2-LICENSE.txt'), 'missing chip-core license'
+    assert apk.read('assets/licenses/SOURCE.txt'), 'missing corresponding source location'
     index = json.loads(apk.read('assets/content/index.json'))
     parts = {part['file']: part for entry in index['entries'] for part in entry['parts']}
     for part in parts.values():

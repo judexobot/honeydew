@@ -81,3 +81,19 @@ Local commits be14707 / 328b599 / 2d9d80c / 67c7135 / 754f2db map to GitHub comm
 exactly before publication. Current remote checkpoint before the final fixes: 382995be169d99c02b4a559efb92170a8a32eb12.
 Publish via GitHub tree/commit/ref tools (no shell push credential). Branch updates use expected_sha leases.
 Payload chunk helpers and commit/tree exports are in /workspace/.honeydew-build-support/publish.
+
+Latest local verification: Android ARM64 and wasm checks pass; all 20 DMG tests and the Gen callback allocation
+check pass. Host integration passed 10/11: source-16 MIDI/sustain/panic, piano-roll save/seek/release, legacy preset
+migration and defaults passed. The bank test incorrectly compared PSG patches using only tone A; it now auditions
+all three independent tone channels with a triad as well. The initial single-note peaks were -9.6 to -19.9 dBFS;
+Organ's trim is increased 2.4 dB to align it with the bank. The revised bank test still checks every patch's single
+note and now also verifies finite unclipped triads and real differences. Re-run this test before final delivery.
+Next full run (commit d7c891b before the bank correction): https://github.com/judexobot/honeydew/actions/runs/40953487471
+
+Bank correction recheck: PASS. All 13 original presets now pass single-note/triad sound, finite-output and distinct
+three-channel audition checks. Organ single-note peak is -17.5 dBFS. All 62 targeted application tests PASS, including
+new operator-copy/A/B/wave-button interactions, both Gen models at mobile densities, complete panel references,
+all preset roundtrips and all five previously failing fixtures. Gen callback allocation check is zero calls.
+Updated tools/content-build/Cargo.lock: it predated the existing FFT/Blip dependencies as well as the new C build;
+its isolated locked build now resolves all three. Android packages the licenses and immutable corresponding-source
+link alongside its resources. Next Actions should perform the full library gate and build the debug APK.
