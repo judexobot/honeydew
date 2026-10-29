@@ -1,7 +1,7 @@
-name: Console Color · tests and Android ARM64
+name: Console Color · fidelity tests and Android ARM64
 on:
   push:
-    branches: [feature/console-color-fx]
+    branches: [feature/console-color-fx, feature/console-color-fidelity-v2]
   workflow_dispatch:
 concurrency:
   group: console-color-${{ github.ref }}
