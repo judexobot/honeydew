@@ -668,7 +668,7 @@ pub fn pitcher(slab: &[f32]) -> Option<(f32, Option<usize>)> {
 /// Pitcher 2: the detected and target pitches, Hz (0: none).
 pub fn vocal_tune(slab: &[f32]) -> Option<(f32, Option<i32>, f32)> {
     match slab {
-        &[hz, midi, ratio] => Some((hz, (midi >= 0.0).then(|| midi as i32), ratio)),
+        &[hz, midi, ratio] => Some((hz, (midi >= 0.0).then_some(midi as i32), ratio)),
         _ => None,
     }
 }
