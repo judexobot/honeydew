@@ -106,16 +106,16 @@ fn overview_matches_the_registry() {
 
 #[test]
 fn module_spec_covers_every_effect_and_instrument_id() {
-    // Ids 0-55 less the six unregistered ones.
+    // Ids 0-56 less the six unregistered ones.
     let gaps = [17, 21, 22, 31, 37, 38];
-    for id in 0..=55u16 {
+    for id in 0..=56u16 {
         let want = (!gaps.contains(&id)).then_some(id);
         assert_eq!(module_spec(id).map(|m| m.id), want, "lookup of {id}");
     }
-    assert!(module_spec(56).is_none());
+    assert!(module_spec(57).is_none());
     // modules() keeps its meaning (the effects); the two lists split the registry.
     assert!(modules().all(|m| m.role != Role::Instrument));
-    assert_eq!(modules().count() + instruments().count(), 56 - gaps.len());
+    assert_eq!(modules().count() + instruments().count(), 57 - gaps.len());
 }
 
 #[test]
