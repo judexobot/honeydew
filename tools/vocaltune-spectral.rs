@@ -26,7 +26,7 @@ fn actual_output_is_tuned_closer_to_440() {
         let (y, _) = fx.process_frame(x, x);
         if i >= 72_000 { output.push(y); }
     }
-    let mut strongest = (0, -1.0_f64);
+    let mut strongest = (0_i32, -1.0_f64);
     for hz in 425..=460 {
         let magnitude = magnitude(&output, hz as f64, rate);
         if magnitude > strongest.1 { strongest = (hz, magnitude); }
