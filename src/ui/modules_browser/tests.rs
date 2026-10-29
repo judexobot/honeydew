@@ -71,6 +71,7 @@ const SPEC: &[(&str, &[&str])] = &[
             "Pitcher",
             "Pitcher 2",
             "VocalTune",
+            "Console Color",
             "Tape Stop",
             "Tremolo",
             "Tuner",
@@ -883,6 +884,7 @@ fn top_level_lists_the_actions_then_the_instruments_then_the_effects_each_by_typ
             "Scale",
             "Arpeggiator",
             "VocalTune",
+            "Console Color",
             // Honeydew's own: 1002, 1003, then the built-in plugin.
             "Lemon Reverb",
             "Lemon Limiter",

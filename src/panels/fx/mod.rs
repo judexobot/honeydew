@@ -16,6 +16,7 @@ mod autoduck;
 mod autoduck_legacy;
 mod chorus;
 mod comb_filter;
+mod console_color;
 mod compressor;
 mod distortion;
 mod equalizer;
@@ -94,6 +95,7 @@ modules! {
     50 => scale,
     51 => arpeggiator,
     53 => vocal_tune,
+    56 => console_color,
 }
 
 /// Where the rack posts a module's latest meter (a [`MeterSnapshot`]) for its panel's draws, in egui temp data: under

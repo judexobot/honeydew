@@ -2,7 +2,7 @@ use super::spec_rows::ROWS;
 use super::*;
 
 /// The effect overview: id, display name, unique name, params, legacy, role.
-const OVERVIEW: [(u16, &str, &str, usize, bool, Role); 40] = [
+const OVERVIEW: [(u16, &str, &str, usize, bool, Role); 41] = [
     (3, "Equalizer", "Param EQ", 21, false, Role::Effect),
     (4, "MultiFX", "MultiFX", 7, false, Role::Effect),
     (5, "Limiter", "Limiter (Legacy)", 4, true, Role::Effect),
@@ -64,6 +64,7 @@ const OVERVIEW: [(u16, &str, &str, usize, bool, Role); 40] = [
         Role::NoteEffect,
     ),
     (53, "VocalTune", "VocalTune", 33, false, Role::Effect),
+    (56, "Console Color", "Console Color", 11, false, Role::Effect),
 ];
 
 fn spec(id: u16) -> &'static ModuleSpec {

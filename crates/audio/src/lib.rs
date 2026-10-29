@@ -5,6 +5,7 @@ pub mod builtin_drums;
 pub mod builtin_loops;
 pub mod builtin_shapes;
 mod comb;
+pub mod console_color;
 pub mod device;
 pub mod drums;
 pub mod dw_sampler;
@@ -103,6 +104,7 @@ pub fn effect_info(id: u16) -> Option<EffectInfo> {
         45 => ("Pitcher 2", 27),
         46 => ("Tremolo", 12),
         53 => ("VocalTune", vocal_tune::NUM_PARAMS),
+        56 => ("Console Color", console_color::PARAM_COUNT),
         lemon::REVERB => ("Lemon Reverb", lemon::REVERB_MID_SIDE + 1),
         lemon::LIMITER => ("Lemon Limiter", lemon::LIMITER_SAFETY + 1),
         _ => return None,
@@ -464,6 +466,10 @@ impl AudioEffect {
                 ],
                 Processor::Tremolo(TremoloState::default()),
             ),
+            56 => {
+                let params = console_color::DEFAULTS.to_vec();
+                (params, Processor::ConsoleColor(Box::new(console_color::ConsoleColor::new(sample_rate))))
+            }
             53 => {
                 let params = vocal_tune::DEFAULTS.to_vec();
                 let rate = sample_rate as u32;
@@ -874,6 +880,7 @@ enum Processor {
     Pitcher(Box<PitcherState>),
     Pitcher2(Box<Pitcher2State>),
     VocalTune(Box<vocal_tune::VocalTune>),
+    ConsoleColor(Box<console_color::ConsoleColor>),
     Comb(Box<CombState>),
     TapeStop(TapeStopState),
     Spreader(SpreaderState),
@@ -913,6 +920,7 @@ impl Processor {
             Self::Pitcher2(state) => {
                 state.refresh(params, sample_rate).unwrap();
             }
+            Self::ConsoleColor(state) => state.refresh(params, sample_rate),
             Self::VocalTune(state) => {
                 let root = (params[1] * 11.0).round() as u8;
                 let scale = match (params[2] * 5.0).round() as u8 {
@@ -1029,6 +1037,7 @@ impl Processor {
             Self::Pitcher(state) => state.process_frame(l, r),
             Self::Pitcher2(state) => state.process_frame(l, r),
             Self::VocalTune(state) => state.process_frame(l, r),
+            Self::ConsoleColor(state) => state.process_frame(l, r),
             Self::Comb(state) => state.process_frame(l, r),
             Self::TapeStop(state) => state.process_frame(l, r),
             Self::Spreader(state) => state.process_frame(l, r),
@@ -1068,6 +1077,7 @@ impl Processor {
             Self::Pitcher(state) => state.reset(),
             Self::Pitcher2(state) => state.reset(),
             Self::VocalTune(state) => state.reset(),
+            Self::ConsoleColor(state) => state.reset(),
             Self::Comb(state) => state.reset(),
             Self::TapeStop(state) => state.reset(),
             Self::Spreader(state) => state.reset(),

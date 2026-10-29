@@ -5,6 +5,7 @@
 //! The stored param numbers (param 0 is always `Enable`), shared with the audio side.
 
 mod channel;
+mod console_color;
 mod display;
 mod effects;
 mod effects_24_51;
@@ -294,6 +295,7 @@ pub fn modules() -> impl Iterator<Item = &'static ModuleSpec> {
         .iter()
         .chain(effects_24_51::MODULES)
         .chain(vocal_tune::MODULES)
+        .chain(console_color::MODULES)
 }
 
 /// Every registered instrument in id order.
