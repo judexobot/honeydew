@@ -172,6 +172,12 @@ impl Voice {
     }
 }
 fn midi_frequency(key: u8) -> f32 { 440.0 * 2.0f32.powf((key as f32 - 69.0) / 12.0) }
+/// SN76489-compatible Sega 16-bit LFSR; white=true uses the Genesis XOR taps.
+fn psg_noise_step(lfsr: u16, white: bool) -> u16 {
+    let feedback = if white { (lfsr ^ (lfsr >> 3)) & 1 } else { lfsr & 1 };
+    (lfsr >> 1) | (feedback << 15)
+}
+
 /// Bandlimiting step correction for PSG square-wave discontinuities.
 fn poly_blep(t: f32, dt: f32) -> f32 {
     if t < dt {
@@ -199,7 +205,7 @@ impl Gen {
         let rate = if rate.is_finite() && (8000.0..=192000.0).contains(&rate) { rate } else { 48000.0 };
         Self { rate, params: DEFAULTS, voices: [Voice::default(); 6],
             tones: [Tone::default(); 3], pedals: [false; 16],
-            age: 0, bend: [0.0; 16], lfo_phase: 0.0, noise: 0x4000,
+            age: 0, bend: [0.0; 16], lfo_phase: 0.0, noise: 0x8000,
             noise_phase: 0.0, noise_on: false, smooth_gain: 0.0,
             telemetry: [0.0; 10] }
     }
@@ -251,10 +257,12 @@ impl Gen {
         if self.noise_on && self.params[47] > 0.0 {
             let hz = 160.0 * 2.0f32.powf(8.0 * self.params[49]);
             self.noise_phase += hz / self.rate;
-            if self.noise_phase >= 1.0 {
+            // Genesis PSG: 16-bit shift register, white noise taps 0 and 3 (0x0009)
+            // and periodic noise reinserts bit 0 at bit 15.
+            // Advance every elapsed tick, including at low host sample rates.
+            while self.noise_phase >= 1.0 {
                 self.noise_phase -= 1.0;
-                let bit = if self.params[48] >= 0.5 { self.noise & 1 } else { (self.noise ^ (self.noise >> 1)) & 1 };
-                self.noise = (self.noise >> 1) | (bit << 14);
+                self.noise = psg_noise_step(self.noise, self.params[48] < 0.5);
             }
             let value = (if self.noise & 1 != 0 { 1.0 } else { -1.0 }) * self.params[47] * 0.15;
             lr[0] += value; lr[1] += value;
@@ -297,7 +305,7 @@ impl Instrument for Gen {
     fn reset(&mut self) {
         self.voices.fill(Voice::default());
         self.tones.fill(Tone::default());
-        self.noise = 0x4000; self.noise_phase = 0.0;
+        self.noise = 0x8000; self.noise_phase = 0.0;
         self.lfo_phase = 0.0; self.noise_on = false;
         self.telemetry.fill(0.0); self.pedals.fill(false);
         self.smooth_gain = 0.0;
@@ -380,6 +388,15 @@ mod tests {
         g.process(&mut l, &mut r, CTX);
         assert!(l.iter().all(|x| x.is_finite()));
         assert!(l.iter().any(|x| x.abs() > 0.001));
+    }
+    #[test]
+    fn genesis_noise_has_sixteen_bit_feedback_and_periodic_cycle() {
+        let mut periodic = 0x8000u16;
+        for _ in 0..16 { periodic = psg_noise_step(periodic, false); }
+        assert_eq!(periodic, 0x8000, "periodic noise repeats every 16 shifts");
+        let mut white = 0x8000u16;
+        for _ in 0..40 { white = psg_noise_step(white, true); }
+        assert_ne!(white, 0x8000, "white noise feedback uses taps 0 and 3");
     }
     #[test] fn psg_only_produces_square_wave() {
         let mut g = Gen::new(48000.0);
