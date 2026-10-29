@@ -1,0 +1,70 @@
+name: Console Color · tests and Android ARM64
+on:
+  push:
+    branches: [feature/console-color-fx]
+  workflow_dispatch:
+concurrency:
+  group: console-color-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: 2
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev clang
+      - name: Console DSP + effects API
+        run: |
+          cargo test -p honeydew-audio --locked --lib console_color
+          cargo test -p honeydew-audio --locked --test effects
+      - name: UI registry, layout, instruments and saved projects
+        run: |
+          cargo test -p honeydew --locked --lib every_panel_matches_its_reference
+          cargo test -p honeydew --locked --lib modules_lists_exactly_the_overview_ids_in_order
+          cargo test -p honeydew --locked --lib top_level_lists_the_actions_then_the_instruments_then_the_effects_each_by_type_id
+          cargo test --locked --test integration_instruments
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+  android:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: console-color-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Android toolchain
+        run: |
+          sudo apt-get update && sudo apt-get install -y libclang-dev clang
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.0.13004108'
+          cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Build native Android library and signed debug APK
+        run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.0.13004108" tools/android-dist.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Honeydew-ConsoleColor-SNES-GBA-N64-PS1-Android-arm64-debug
+          path: target/honeydew-android-*-arm64-debug.apk
+          if-no-files-found: error
+          retention-days: 7
