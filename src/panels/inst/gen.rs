@@ -21,10 +21,10 @@ fn touch_button(
     id: Id,
     rect: Rect,
     label: &str,
-    enabled: bool,
-    selected: bool,
+    state: (bool, bool),
     ink: Color32,
 ) -> bool {
+    let (enabled, selected) = state;
     let r = ui.interact(
         rect,
         id,
@@ -249,8 +249,7 @@ fn operator_monitor(
         id.with("copy"),
         cell(buttons, 0, 3),
         "Copy operator",
-        true,
-        false,
+        (true, false),
         ink,
     ) {
         let values: Vec<_> = operator_indices(op).map(|i| module.params[i]).collect();
@@ -262,8 +261,7 @@ fn operator_monitor(
         id.with("paste"),
         cell(buttons, 1, 3),
         "Paste operator",
-        copy.is_some(),
-        false,
+        (copy.is_some(), false),
         ink,
     ) && let Some(copy) = copy
     {
@@ -278,8 +276,7 @@ fn operator_monitor(
         id.with("init"),
         cell(buttons, 2, 3),
         "Init operator",
-        true,
-        false,
+        (true, false),
         ink,
     ) {
         changed.extend(set_values(
@@ -369,8 +366,7 @@ fn patch_tools(
             id.with(n),
             cell(rect, n, 5),
             name,
-            enabled,
-            selected,
+            (enabled, selected),
             ink,
         ) {
             match n {

@@ -2139,10 +2139,7 @@ fn hold(
             row(instance_id)
                 .and_then(|r| {
                     keys[channel].get_mut(
-                        instruments[channel].len()
-                            + 1
-                            + r * source_stride
-                            + usize::from(midi),
+                        instruments[channel].len() + 1 + r * source_stride + usize::from(midi),
                     )
                 })
                 .and_then(|r| r.get_mut(usize::from(key))),

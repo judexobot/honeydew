@@ -278,14 +278,15 @@ fn vibrato_portamento_and_amplitude_changes_keep_harmonic_tracking() {
             let x = vowel(phase, hz, amplitude);
             let (l, r) = fx.process_frame(x, -x);
             assert!(l.is_finite() && r.is_finite() && l.abs() < 3.0 && r.abs() < 3.0);
-            if t > 0.15 && n % (rate / 200) == 0 {
-                if let Some(actual) = fx.detected_hz() {
-                    // Detection observes the trailing window; 30 cents covers this moving test's delay.
-                    let cents = (1200.0 * (actual / hz).log2()).abs();
-                    errors += usize::from(cents > 30.0);
-                    octave_errors += usize::from(cents > 600.0);
-                    tracked += 1;
-                }
+            if t > 0.15
+                && n % (rate / 200) == 0
+                && let Some(actual) = fx.detected_hz()
+            {
+                // Detection observes the trailing window; 30 cents covers this moving test's delay.
+                let cents = (1200.0 * (actual / hz).log2()).abs();
+                errors += usize::from(cents > 30.0);
+                octave_errors += usize::from(cents > 600.0);
+                tracked += 1;
             }
         }
         assert!(

@@ -1,5 +1,6 @@
-//! Gen: six-voice, four-operator Genesis-inspired FM synth with SN76489-style PSG.
-//! This musical instrument is not a cycle-accurate YM2612/SN76489 emulator.
+//! Gen: six four-operator FM voices and three PSG tones, with compatible Legacy
+//! and optional register-clocked YM2612/Sega PSG models. The musical host adds
+//! velocity, pan and glide; complete-console timing and analog fidelity are not claimed.
 //! No allocations, mutexes, filesystem accesses, or sample loading in the audio callback.
 mod psg;
 mod ym2612;

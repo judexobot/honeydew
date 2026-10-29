@@ -1,63 +1,83 @@
-# Ultimate Audio integration — working state
+# Ultimate Audio integration — 2026-10-29
 
-- Fork: judexobot/honeydew. Development branch: integration/ultimate-audio.
-- Baseline: feature/gen-fm-vocaltune-pro, 8ae264c6ad4b788c33fd7c5512b62f9ceb011d24.
-- Prior Android APK: https://github.com/judexobot/honeydew/actions/runs/40929480661
-- General CI baseline: https://github.com/judexobot/honeydew/actions/runs/40929480809
-- Fixed its VocalTune rustfmt failure; local workspace Clippy (all targets, -D warnings) passes after it.
+Fork only: judexobot/honeydew. Branch: integration/ultimate-audio. main and upstream are untouched.
+Baseline: feature/gen-fm-vocaltune-pro, 8ae264c6ad4b788c33fd7c5512b62f9ceb011d24.
+Previous successful Android APK: https://github.com/judexobot/honeydew/actions/runs/40929480661
+Original CI failure: https://github.com/judexobot/honeydew/actions/runs/40929480809 (VocalTune rustfmt).
 
-Audit: VocalTune is monophonic anti-aliased YIN + STFT/cepstral formants, with measured synthetic tests and two latency profiles. Voice-corpus/phone validation remains pending. The DMG core is register/timer based and bandlimited; analog/zombie revision details remain approximate. Its Wave RAM editor works but needs clipboard/import/reset operations. Gen currently has 56 saved parameters, six musical FM voices, linear ADSR, approximate algorithm families and three PolyBLEP PSG tones; it is not yet a YM2612/SN76489 emulator. Gen's channel-aware methods are currently bypassed by the host's APU-only MIDI routing. Repeated notes can stack unintended voices, sustain/panic and output-control smoothing need coverage. New Gen controls must be appended; old projects must keep their existing model.
+## Implemented
 
-Next: extend MIDI routing/recording to Gen; evaluate licensed Nuked-OPN2 as an optional clocked core, measuring cost before enabling it; add real register-clocked PSG, meaningful UI editing and original presets. Audit license: Nuked-OPN2 LGPL-2.1-or-later is compatible with this GPL-3.0-or-later repository. No game ROM/BIOS/assets are required. Consolidate CI with the final artifact name Honeydew-VocalTune-GameBoy-Gen-Android-arm64-debug. Preserve main and the user's baseline branch.
+- IDs 53/54/55 and all prior parameter indices remain. Gen retains the Legacy default and all first 56 values;
+  new fields are appended, for 106 total. Older presets acquire compatible defaults without switching engines.
+- Gen: optional Nuked-OPN2 YM2612 model, pinned unmodified LGPL-2.1-or-later source at
+  335747d78cb0abbc3b55b004e62dad9763140115. Separate bounded C adapter paces/coalesces bus writes, snapshots
+  address/data pairs, pairs FNUM high/low latches, and retains retrigger edges. A low FNUM write commits its high
+  latch even when its low byte is unchanged. YM2612 FNUM scaling corrected against measured audio pitch.
+- Real chip AR/DR/SR/SL/RR, rate scaling, TL, detune, SSG-EG, multiplier, per-operator AM, LFO, algorithms and feedback.
+  PAL/NTSC clocks; bandlimited host resampling, approximate external high-pass, additional host pan/velocity/glide.
+- Independent clocked Sega PSG: latch registers, 10-bit periods, Sega zero-period behavior, 2-dB attenuation,
+  16-bit white/periodic LFSR, clock divisors/tone-C feedback, bandlimited output. Modern PSG remains selectable.
+- Bounded six FM/three PSG voice allocation; same-note retriggers reuse their source's voice. Sustain, bend and
+  CC120/123 respect 16 MIDI sources. Host live chains, recorders, sequencer/checkpoint/seek rows and lane menus
+  now route all 16 sources to Gen. APU-only racks retain four sources. Engine swaps fade the previous output.
+- Gen editor: eight pages, mode-specific operator controls, eight selectable routing diagrams, actual live operator
+  envelope trace/LFO phase/channel/output meters, operator copy/paste/init, patch A/B and init. A/B snapshots are
+  temporary editor state; the selected sound saves in ordinary project/preset parameters.
+- Thirteen original factory patches: FM Bass/Piano, Electric Piano, Bell, Metallic Percussion, Brass, Synth Lead,
+  Pluck, Organ, Sega-style Pad, PSG Lead/Arpeggio and Noise Percussion. PSG Arpeggio is a patch for sequenced
+  arpeggios, not an automatic arpeggiator. No game ROMs, BIOS, music or proprietary patch data.
+- DMG: CC123 now retains sustain, CC120 cancels it. Touch Wave RAM editor gains copy/paste/reset and validated
+  32-nibble HEX import/export. Wave state saves with projects/presets. Standalone wave file dialogs are pending.
+- VocalTune: bounded octave hysteresis accepts persistent real octave changes after five detector hops (25 ms);
+  the previous detector could latch indefinitely. Existing independent YIN/STFT/cepstral formant processing and
+  33 parameters remain. New synthetic vowel tests cover octaves, vibrato, portamento and changing amplitude.
+- Fixed CI's format issue, added missing Gen selector fixtures and menu row, and made browser tests scroll to
+  entries beyond the viewport. Added preset-count coverage for the new bank. No checks were disabled.
 
-Workspace: /workspace/honeydew-ultimate is isolated from the previous /workspace/honeydew worktree. Reuse /workspace/honeydew/target via CARGO_TARGET_DIR; Android SDK/NDK/JDK are in /workspace/.honeydew-build-support with /tmp symlinks. Keep large build tools off /tmp (tmpfs shares the 8 GiB RAM limit). Read /workspace/.honeydew-build-support/ultimate-clippy.log for the baseline check.
+## Verified so far
 
-## Core work in progress
+- Local Android ARM64 whole-app `cargo ndk ... check --lib --locked`: PASS.
+- Local wasm32 whole workspace including C adapter: PASS.
+- Native C adapter UBSan smoke: PASS.
+- Local Gen DSP: 5 tests PASS (measured A4 within 4 cents in PAL/NTSC at 8/44.1/48/96/192 kHz, silence/release,
+  channel panic, eight distinct algorithms, invalid inputs and actual raw envelope/level/multiplier/AM effects).
+- Local VocalTune DSP: 9 tests PASS, including output cents, latency, synthetic formants and moving vowels.
+- First full app library run: 4354 passed, 5 stale fixtures failed, 2 baseline ignored. All five fixtures are now
+  corrected; fresh targeted checks and the complete Actions suite are pending. Existing panel reference/bounds,
+  density, wave drawing and parameter/preset roundtrip checks passed in that run.
+- Strict Clippy found only new literal precision/helper arity/test-style issues, now corrected. Final rerun pending.
+- First consolidated run: https://github.com/judexobot/honeydew/actions/runs/40952307441
+  Validation found one remaining rustfmt line in host MIDI bookkeeping; corrected locally. ARM audio job PASSED:
+  20 DMG + 8 Gen unit tests, 5 Gen + 9 VocalTune + 2 spectral integration tests, both allocation checks and WAV smoke.
+  ARM QA artifact: https://github.com/judexobot/honeydew/actions/runs/40952307441/artifacts/12932187107
+- ARM64 runner measurements (3 seconds audio, not phone measurements): VocalTune monitor 0.088571 s / studio
+  0.100280 s; DMG Authentic 0.032928 s / Extended 0.032962 s (single-note workload); six-voice Gen Legacy
+  0.090188 s / YM2612 + clocked PSG 0.261811 s. VocalTune declared DSP delay 1024/2048 samples at 48 kHz.
 
-- MIDI routing/recorders and sequencer checkpoint rows now support 16 sources on Gen racks (4 retained on APU-only racks); Gen lane destinations are in two short menu columns.
-- Optional Gen YM2612 model is being added alongside Legacy. The first 56 parameter indices are untouched; appended model/region/PSG controls plus 4 × 10 raw operator controls bring the DSP contract to 102.
-- Nuked-OPN2 is vendored unmodified at 335747d78cb0abbc3b55b004e62dad9763140115. The host adapter snapshots/coalesces bounded bus writes, pairs shared FNUM latches, keeps key-off/on retriggers and applies optional host pan. C undefined-behavior sanitizer smoke passed. A measured factor-of-two FNUM error was fixed to the actual chip formula (21 − block).
-- New pure Rust clocked Sega PSG has raw latch writes, 10-bit periods, original attenuation and noise divisors/tone-C feedback, plus bandlimited resampling. Register/noise tests pass.
-- Native tests: four in crates/audio/tests/gen.rs cover actual pitch across sample rates/regions, silence/release/panic, distinct algorithms and finite input handling. Re-run the latest log; their first run found the FNUM issue above.
-- Pending immediately: expose/match all 102 params in the registry and editor, add original presets, finish clipboard operations and VocalTune tracking tests, then run strict checks and consolidate Actions. Do not call the new model production-ready before engine + UI + Android pass together.
+## Current verification and next steps
 
-## Integration checkpoint (2026-10-29)
+Local integration suite tests all 13 patches through SongAudioEngine, old 56-param presets, MIDI sources 2/16,
+independent sustain/panic, piano roll and save/seek/release. New UI interaction tests exercise operator copy,
+patch A/B and Wave RAM tools. Finish strict Clippy, rerun failed fixtures/new tests, inspect the next Actions run.
+The milestone commit containing [android] requests the final debug APK, gated on all validation and ARM tests.
+Artifact name: Honeydew-VocalTune-GameBoy-Gen-Android-arm64-debug. It must contain libhoneydew.so, bundled resources,
+debug signing and 16-KiB ELF/ZIP alignment; tools/android-dist.sh checks these without dropping instruments/assets.
 
-Local commits: be14707 (format/audit), 328b599 (optional YM2612/clocked PSG and 16-source host routing),
-2d9d80c (106-parameter editor, algorithms, operator copy/init, patch A/B and 13 original presets),
-67c7135 (bounded vocal octave tracking, DMG sustain, Wave RAM exchange, integration tests).
-Remote Git data commits corresponding to the last three: 22d9878270b2f7452e162ccd03b08293ee3dbae5,
-9cd8d6bac9dc583a366bada03537954f3476b9af, 3f17140b2932688917bd1d48d3c3632862dec8a7.
-These are being published together with the consolidated workflow, to avoid unnecessary builds.
+Remaining advanced scope: real-singer corpus/listening tests, recorded-audio manual note editor, physical Android
+latency/touch/audio validation, full DMG conformance ROM harness/revision-specific zombie/analog cases, standalone
+wave files, console-level YM timers/CSM/channel-3 special-mode/DAC sample editing and hardware-reference comparisons.
+The core is materially more faithful; the whole instrument is not claimed 100% or complete-console cycle accurate.
 
-- Gen retains all first 56 parameters and the default Legacy sound model; new projects/presets can choose YM2612.
-  There are now 106 parameters (four native AM enables appended at 102–105). Clocked PSG is also optional.
-  Raw YM envelopes, rate scaling, levels, multipliers, detune, SSG-EG and LFO drive the vendored chip registers.
-  Six FM voices and three PSG tones remain bounded. Host MIDI, piano roll and recorders now address 16 sources.
-  Engine changes release voices with a short output crossfade. A/B slots and operator clipboard are editor-session
-  tools; the selected sound is saved as normal project/preset parameters. PSG Arpeggio is a sound for sequenced
-  arpeggios, not an automatic arpeggiator.
-- New Gen core tests measured A4 within 4 cents at 8/44.1/48/96/192 kHz in PAL and NTSC, silence/release,
-  channel-specific panic, distinct algorithms and actual raw envelope/level/AM effects. C adapter UBSan smoke passes.
-  An initial standalone core benchmark took 0.405 CPU seconds for 3 seconds of chip audio on this host; use the
-  expanded instruments_smoke example for the complete six-voice engine and native ARM64 measurements.
-- DMG: CC123 now honors sustain; CC120 cancels it. Wave clipboard/reset and validated 32-nibble HEX exchange are
-  functional. Wave RAM remains saved in projects/presets. Standalone wave file dialogs are not implemented.
-- VocalTune: octave hysteresis now expires after five consistent detector hops (25 ms), allowing real upward
-  octave changes that previously latched forever. New tests use synthetic harmonic vowels with vibrato,
-  portamento and amplitude changes. No human vocal corpus or subjective listening validation is claimed.
-- The formatting-only remote CI 40948920494 passed fmt and Clippy, then exposed five pre-existing Gen test
-  fixture failures. Selector coverage and the add-channel table have been corrected; browser tests now scroll
-  to rows beyond the viewport instead of assuming the longer instrument list fits. No checks were disabled.
-- Ultimate workflow consolidates format, all-target Clippy, complete workspace library tests, instrument
-  integration/persistence tests, DSP spectral tests, allocation checks, content-tool and wasm compilation,
-  native ARM64 DSP/audio fixtures, and a signed/aligned debug APK. Android builds run only for [android]
-  milestones or manual dispatch. Artifact: Honeydew-VocalTune-GameBoy-Gen-Android-arm64-debug.
+## Workspace / history
 
-Still verifying locally: full application library suite and the new interaction tests; strict Clippy; native
-ARM64/wasm cross compilation; all presets through SongAudioEngine. Logs are in /workspace/.honeydew-build-support/.
-The previous `ultimate-editor-check.log` has overlapping stale output from two processes; use new logs instead.
-Remaining scope: recorded-audio manual pitch editing, real-phone latency/touch/audio testing, full DMG conformance
-ROM harness and revision-specific analog/zombie behavior, console-level YM timers/CSM/channel-3 special mode,
-sample/DAC editor, full hardware-reference comparisons. The optional Nuked engine materially improves operators
-and algorithm fidelity, but the complete musical instrument is not claimed cycle-accurate or 100% faithful.
+Use /workspace/honeydew-ultimate, not the older dirty /workspace/honeydew worktree.
+Reuse CARGO_TARGET_DIR=/workspace/honeydew/target; CARGO_BUILD_JOBS=1 for large local root builds (2 CPU quota).
+Native Linux needs PKG_CONFIG_PATH=/tmp/honeydew-native/lib/pkgconfig and BINDGEN_EXTRA_CLANG_ARGS=-I$(cc -print-file-name=include).
+Android NDK/JDK and large target caches live under /workspace/.honeydew-build-support (symlinked from /tmp).
+Logs are in that folder; ultimate-editor-check.log contains overlapping stale output, use newer logs.
+
+Local commits be14707 / 328b599 / 2d9d80c / 67c7135 / 754f2db map to GitHub commits
+734c246 / 22d9878 / 9cd8d6b / 3f17140 / 382995b. Connector commit authors produce different SHAs; trees were compared
+exactly before publication. Current remote checkpoint before the final fixes: 382995be169d99c02b4a559efb92170a8a32eb12.
+Publish via GitHub tree/commit/ref tools (no shell push credential). Branch updates use expected_sha leases.
+Payload chunk helpers and commit/tree exports are in /workspace/.honeydew-build-support/publish.

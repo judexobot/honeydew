@@ -123,7 +123,7 @@ fn each_preset_reads_back_through_the_preset_loader_and_fits_its_module() {
             read += 1;
         }
     }
-    assert_eq!(read, 12 + 11 + 8 + 14 + 10 + 4 + 8);
+    assert_eq!(read, 12 + 11 + 8 + 14 + 10 + 4 + 8 + 13);
 }
 
 /// Each module folder lists its categories, or (Transistor Bass) its presets, as the picker's root shows them after
