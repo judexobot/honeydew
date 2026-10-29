@@ -22,5 +22,5 @@ modules! {
     39 => three_osc,
     52 => soundfont_player,
     54 => gameboy_apu,
-    55 => gen,
+    55 => r#gen,
 }
