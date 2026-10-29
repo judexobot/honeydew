@@ -1038,7 +1038,7 @@ fn enable_is_on_from_one_half_for_every_effect() {
     let ids: Vec<u16> = (0..64)
         .filter(|&id| AudioEffect::new(id, CTX.sample_rate).is_ok())
         .collect();
-    assert_eq!(ids.len(), 35);
+    assert_eq!(ids.len(), 36);
     for id in ids {
         let steps = |v| [setup(id), &[(0, v)]].concat();
         let audible = two_state(id, steps, true);
