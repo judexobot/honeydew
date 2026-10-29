@@ -224,3 +224,73 @@ fn switching_profiles_back_and_forth_discards_stale_audio() {
         assert!((peak(&output, 440.0, 48000) - 440.0).abs() < 2.0);
     }
 }
+
+// Synthetic harmonic excitation with moving vowel resonances. This checks tracking,
+// not subjective quality or validation against a corpus of real singers.
+fn vowel(phase: f32, hz: f32, amplitude: f32) -> f32 {
+    let mut sample = 0.0;
+    for harmonic in 1..=24 {
+        let f = hz * harmonic as f32;
+        let resonances = 0.3
+            + 2.0 * (-0.5 * ((f - 650.0) / 160.0).powi(2)).exp()
+            + (-0.5 * ((f - 1700.0) / 250.0).powi(2)).exp();
+        sample += amplitude * resonances / harmonic as f32 * (TAU * phase * harmonic as f32).sin();
+    }
+    sample
+}
+#[test]
+fn actual_upward_octave_transitions_do_not_remain_latched_to_the_old_note() {
+    for studio in [false, true] {
+        let mut fx = VocalTune::new(48000).unwrap();
+        fx.set_parameters(Parameters {
+            studio,
+            hard_tune: true,
+            ..Default::default()
+        });
+        let mut phase = 0.0;
+        for hz in [110.0, 220.0, 440.0, 220.0, 110.0] {
+            for _ in 0..14400 {
+                phase = (phase + hz / 48000.0).fract();
+                let x = vowel(phase, hz, 0.13);
+                let (l, r) = fx.process_frame(x, x);
+                assert!(l.is_finite() && r.is_finite());
+            }
+            let actual = fx.detected_hz().expect("voiced harmonic signal");
+            let cents = 1200.0 * (actual / hz).log2();
+            assert!(
+                cents.abs() < 15.0,
+                "studio={studio} {hz} Hz detected as {actual}, {cents} cents"
+            );
+        }
+    }
+}
+#[test]
+fn vibrato_portamento_and_amplitude_changes_keep_harmonic_tracking() {
+    for rate in [44100, 48000, 96000] {
+        let mut fx = VocalTune::new(rate).unwrap();
+        let mut phase = 0.0;
+        let (mut tracked, mut errors, mut octave_errors) = (0, 0, 0);
+        for n in 0..rate {
+            let t = n as f32 / rate as f32;
+            let hz = 160.0 * 2.0f32.powf((2.0 * t + 0.22 * (TAU * 5.5 * t).sin()) / 12.0);
+            phase = (phase + hz / rate as f32).fract();
+            let amplitude = 0.015 + 0.12 * (TAU * 1.7 * t).sin().powi(2);
+            let x = vowel(phase, hz, amplitude);
+            let (l, r) = fx.process_frame(x, -x);
+            assert!(l.is_finite() && r.is_finite() && l.abs() < 3.0 && r.abs() < 3.0);
+            if t > 0.15 && n % (rate / 200) == 0 {
+                if let Some(actual) = fx.detected_hz() {
+                    // Detection observes the trailing window; 30 cents covers this moving test's delay.
+                    let cents = (1200.0 * (actual / hz).log2()).abs();
+                    errors += usize::from(cents > 30.0);
+                    octave_errors += usize::from(cents > 600.0);
+                    tracked += 1;
+                }
+            }
+        }
+        assert!(
+            tracked > 150 && errors < tracked / 5 && octave_errors == 0,
+            "{rate}: tracked={tracked}, errors={errors}, octave errors={octave_errors}"
+        );
+    }
+}

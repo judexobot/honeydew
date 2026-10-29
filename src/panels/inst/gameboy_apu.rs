@@ -2,6 +2,169 @@
 use crate::{panels::build::*, ui::UiCtx};
 use eframe::egui::{Align2, Color32, FontId, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
 use honeydew_audio::gameboy_instrument::{CUSTOM_WAVE, MODE, WAVE_START};
+fn wave_values(module: &ModuleInstance) -> [u8; 32] {
+    std::array::from_fn(|i| {
+        if module.params[CUSTOM_WAVE] >= 0.5 {
+            (module.params[WAVE_START + i] * 15.0)
+                .round()
+                .clamp(0.0, 15.0) as u8
+        } else {
+            honeydew_audio::gameboy_instrument::wave_sample(
+                (module.params[9] * 3.0).round() as u8,
+                i,
+            )
+        }
+    })
+}
+fn set_wave(module: &mut ModuleInstance, wave: [u8; 32]) -> Vec<usize> {
+    let mut changed = vec![CUSTOM_WAVE];
+    module.params[CUSTOM_WAVE] = 1.0;
+    for (i, value) in wave.into_iter().enumerate() {
+        module.params[WAVE_START + i] = value.min(15) as f32 / 15.0;
+        changed.push(WAVE_START + i);
+    }
+    changed
+}
+fn parse_wave(text: &str) -> Option<[u8; 32]> {
+    let digits: Vec<_> = text.chars().filter(|c| !c.is_whitespace()).collect();
+    if digits.len() != 32 {
+        return None;
+    }
+    let mut wave = [0; 32];
+    for (i, c) in digits.into_iter().enumerate() {
+        wave[i] = c.to_digit(16)? as u8;
+    }
+    Some(wave)
+}
+#[derive(Clone, Default)]
+struct HexEditor {
+    open: bool,
+    text: String,
+    invalid: bool,
+}
+fn wave_tools(
+    ui: &mut Ui,
+    cx: &UiCtx,
+    id: Id,
+    rect: Rect,
+    module: &mut ModuleInstance,
+    _: &mut PanelState,
+    ink: Color32,
+) -> Vec<usize> {
+    let clipboard_id = Id::new("dmg-wave-clipboard");
+    let copy = ui.ctx().data_mut(|d| d.get_temp::<[u8; 32]>(clipboard_id));
+    let mut editor = ui
+        .ctx()
+        .data_mut(|d| d.get_temp::<HexEditor>(id))
+        .unwrap_or_default();
+    let mut changed = Vec::new();
+    for (i, label) in ["Copy wave", "Paste wave", "Reset wave", "HEX import/export"]
+        .iter()
+        .enumerate()
+    {
+        let cell = Rect::from_min_size(
+            rect.min + vec2(i as f32 * rect.width() / 4.0, 0.0),
+            vec2(rect.width() / 4.0, rect.height()),
+        )
+        .shrink(1.0);
+        let enabled = i != 1 || copy.is_some();
+        let response = ui.interact(
+            cell,
+            id.with(i),
+            if enabled {
+                Sense::click()
+            } else {
+                Sense::hover()
+            },
+        );
+        ui.painter().rect_filled(
+            cell,
+            3.0,
+            ink.gamma_multiply(if response.hovered() && enabled {
+                0.18
+            } else {
+                0.06
+            }),
+        );
+        ui.painter().text(
+            cell.center(),
+            Align2::CENTER_CENTER,
+            *label,
+            FontId::proportional(cx.m.u(0.31)),
+            ink.gamma_multiply(if enabled { 1.0 } else { 0.35 }),
+        );
+        if enabled && response.clicked() {
+            match i {
+                0 => {
+                    ui.ctx()
+                        .data_mut(|d| d.insert_temp(clipboard_id, wave_values(module)));
+                }
+                1 => {
+                    if let Some(copy) = copy {
+                        changed.extend(set_wave(module, copy));
+                    }
+                }
+                2 => {
+                    let shape = (module.params[9] * 3.0).round() as u8;
+                    changed.extend(set_wave(
+                        module,
+                        std::array::from_fn(|n| {
+                            honeydew_audio::gameboy_instrument::wave_sample(shape, n)
+                        }),
+                    ));
+                    module.params[CUSTOM_WAVE] = 0.0;
+                }
+                _ => {
+                    editor.open = true;
+                    editor.invalid = false;
+                    editor.text = wave_values(module)
+                        .iter()
+                        .map(|v| format!("{v:X}"))
+                        .collect();
+                }
+            }
+        }
+    }
+    if editor.open {
+        let mut open = true;
+        eframe::egui::Window::new("4-bit Wave RAM")
+            .id(id.with("hex"))
+            .open(&mut open)
+            .resizable(false)
+            .show(ui.ctx(), |ui| {
+                ui.label(
+                    "32 hexadecimal samples (0–F). Waves are saved with projects and presets.",
+                );
+                ui.add(
+                    eframe::egui::TextEdit::singleline(&mut editor.text)
+                        .desired_width(cx.m.u(12.0))
+                        .font(eframe::egui::TextStyle::Monospace),
+                );
+                ui.horizontal(|ui| {
+                    if ui.button("Apply wave").clicked() {
+                        if let Some(wave) = parse_wave(&editor.text) {
+                            changed.extend(set_wave(module, wave));
+                            editor.invalid = false;
+                        } else {
+                            editor.invalid = true;
+                        }
+                    }
+                    if ui.button("Copy HEX").clicked() {
+                        ui.ctx().copy_text(editor.text.clone());
+                    }
+                });
+                if editor.invalid {
+                    ui.colored_label(
+                        Color32::LIGHT_RED,
+                        "Enter exactly 32 hexadecimal samples. No values were changed.",
+                    );
+                }
+            });
+        editor.open = open;
+    }
+    ui.ctx().data_mut(|d| d.insert_temp(id, editor));
+    changed
+}
 fn wave_editor(
     ui: &mut Ui,
     cx: &UiCtx,
@@ -170,13 +333,14 @@ pub fn panel() -> Option<Panel> {
             ])
             .h(Size::U(2.0)),
             display(41).h(Size::U(3.5)).draw(wave_editor),
+            display(65).h(Size::U(1.2)).draw(wave_tools),
             row([
                 toggle(42, "Length On").p(69),
                 knob(43, "Length").p(70),
                 knob(44, "Transpose").p(71),
             ]),
         ])
-        .h(Size::U(8.0))
+        .h(Size::U(9.2))
         .show(Show::Tab(2)),
         vstack([
             row([
@@ -235,7 +399,7 @@ pub fn panel() -> Option<Panel> {
 }
 #[cfg(test)]
 pub const REFERENCE: Reference = Reference {
-    size: [14.0, 10.99],
+    size: [14.0, 11.99],
     settings: &[],
     cases: &[
         Case {
@@ -388,18 +552,20 @@ pub const REFERENCE: Reference = Reference {
                 .p(26),
                 crate::panels::build::row(41, Widget::Display, "", [0.00, 3.75, 14.00, 3.50])
                     .h(Size::U(3.50)),
+                crate::panels::build::row(65, Widget::Display, "", [0.00, 7.25, 14.00, 1.20])
+                    .h(Size::U(1.20)),
                 crate::panels::build::row(
                     42,
                     Widget::Toggle,
                     "Length On",
-                    [0.00, 7.25, 4.66, 2.50],
+                    [0.00, 8.45, 4.66, 2.50],
                 )
                 .p(69),
-                crate::panels::build::row(43, Widget::Knob, "Length", [4.66, 7.25, 4.67, 2.50])
+                crate::panels::build::row(43, Widget::Knob, "Length", [4.66, 8.45, 4.67, 2.50])
                     .p(70),
-                crate::panels::build::row(44, Widget::Knob, "Transpose", [9.33, 7.25, 4.67, 2.50])
+                crate::panels::build::row(44, Widget::Knob, "Transpose", [9.33, 8.45, 4.67, 2.50])
                     .p(71),
-                crate::panels::build::row(64, Widget::Display, "", [0.00, 9.75, 14.00, 0.80])
+                crate::panels::build::row(64, Widget::Display, "", [0.00, 10.95, 14.00, 0.80])
                     .h(Size::U(0.80)),
             ],
             ..Case::DEFAULT
@@ -627,3 +793,22 @@ pub const REFERENCE: Reference = Reference {
         },
     ],
 };
+
+#[cfg(test)]
+mod wave_tests {
+    use super::*;
+    #[test]
+    fn hex_import_roundtrips_all_nibbles_and_rejects_bad_waves_atomically() {
+        let wave = parse_wave("0123456789abcdef FEDCBA9876543210").unwrap();
+        let mut module = ModuleInstance::new(54, 0);
+        assert_eq!(set_wave(&mut module, wave).len(), 33);
+        assert_eq!(wave_values(&module), wave);
+        for invalid in [
+            "0123",
+            "0123456789ABCDEF0123456789ABCDEG",
+            "00123456789ABCDEF0123456789ABCDEF",
+        ] {
+            assert!(parse_wave(invalid).is_none());
+        }
+    }
+}

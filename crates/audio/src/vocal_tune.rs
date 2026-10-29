@@ -107,6 +107,8 @@ pub struct VocalTune {
     base_midi: f32,
     recent: [f32; 3],
     pitch_count: usize,
+    octave_candidate: f32,
+    octave_frames: u8,
     retune_alpha: f32,
     gain: f32,
     target_gain: f32,
@@ -171,6 +173,8 @@ impl VocalTune {
             base_midi: 69.0,
             recent: [69.0; 3],
             pitch_count: 0,
+            octave_candidate: 0.0,
+            octave_frames: 0,
             retune_alpha: 0.0,
             gain: 1.0,
             target_gain: 1.0,
@@ -270,6 +274,8 @@ impl VocalTune {
         self.sibilance_smoothed = 0.0;
         self.wet_mix_smoothed = 0.0;
         self.pitch_count = 0;
+        self.octave_candidate = 0.0;
+        self.octave_frames = 0;
         self.gain = self.target_gain;
         self.bypass = f32::from(self.params.enabled);
         self.dry = (0.0, 0.0);
@@ -460,7 +466,26 @@ impl VocalTune {
                 && self.scores[old] < self.scores[lag] + 0.025
                 && (1200.0 * (rate / lag as f32 / previous).log2()).abs() > 700.0
             {
-                lag = old;
+                // A real upward octave has an equally good trough at the old period.
+                // Keep brief harmonic ambiguities stable, but accept a persistent new
+                // candidate after 25 ms rather than latching the old octave indefinitely.
+                let candidate = rate / lag as f32;
+                if self.octave_candidate > 0.0
+                    && (1200.0 * (candidate / self.octave_candidate).log2()).abs() < 100.0
+                {
+                    self.octave_frames = self.octave_frames.saturating_add(1);
+                } else {
+                    self.octave_frames = 1;
+                }
+                self.octave_candidate = candidate;
+                if self.octave_frames < 5 {
+                    lag = old;
+                } else {
+                    self.octave_frames = 0;
+                }
+            } else {
+                self.octave_frames = 0;
+                self.octave_candidate = 0.0;
             }
         }
         let a = self.scores[lag - 1];
@@ -540,6 +565,8 @@ impl VocalTune {
         self.target_ratio = 1.0;
         self.sustain = 0;
         self.pitch_count = 0;
+        self.octave_candidate = 0.0;
+        self.octave_frames = 0;
     }
 }
 fn clean(x: f32, low: f32, high: f32, default: f32) -> f32 {

@@ -181,3 +181,148 @@ fn seeking_between_same_pitch_on_distinct_apu_channels_releases_the_old_address(
     engine.render(&mut output, 2);
     assert_eq!(&engine.analysis(index)[..2], &[1.0, 0.0]);
 }
+
+#[test]
+fn gen_defaults_and_legacy_presets_preserve_parameter_indices() {
+    use honeydew_audio::r#gen::{DEFAULTS, MODEL, NUM_PARAMS};
+    assert_eq!(ModuleInstance::new(55, 0).params, DEFAULTS);
+    assert_eq!(module_spec(55).unwrap().params.len(), NUM_PARAMS);
+    let mut old = ModuleInstance::new(55, 0);
+    old.params.truncate(56);
+    old.params[12] = 0.7;
+    let restored = flm::read_preset(&flm::write_preset(&old).unwrap(), Some(55)).unwrap();
+    assert_eq!(restored.params.len(), NUM_PARAMS);
+    assert_eq!(&restored.params[..56], &old.params);
+    assert_eq!(restored.params[MODEL], 0.0);
+}
+
+#[test]
+fn all_thirteen_gen_presets_roundtrip_and_render_real_audio() {
+    let mut hashes = std::collections::HashSet::new();
+    for name in [
+        "FM Bass",
+        "FM Piano",
+        "Electric Piano",
+        "Bell",
+        "Metallic Percussion",
+        "Brass",
+        "Synth Lead",
+        "Pluck",
+        "Organ",
+        "Sega-style Pad",
+        "PSG Lead",
+        "PSG Arpeggio",
+        "Noise Percussion",
+    ] {
+        let preset = content::preset(55, name).expect(name);
+        assert_eq!(
+            flm::read_preset(&flm::write_preset(&preset).unwrap(), Some(55))
+                .unwrap()
+                .params,
+            preset.params
+        );
+        let mut song = Song::default();
+        song.add_channel(ChannelKind::Synth(SynthKind::Gen));
+        song.channels[1].rack.modules[0].load_preset(preset);
+        let mut engine = SongAudioEngine::new(&song, 48000.0).unwrap();
+        engine.note_on(1, 48, 0.8);
+        let mut audio = vec![0.0; 24000];
+        engine.render(&mut audio, 2);
+        assert!(audio.iter().all(|x| x.is_finite()), "{name}");
+        let peak = audio.iter().map(|x| x.abs()).fold(0.0, f32::max);
+        println!("{name}: peak {:.1} dBFS", 20.0 * peak.max(1e-9).log10());
+        assert!(peak > 0.01 && peak < 0.99, "{name}: peak {peak}");
+        hashes.insert(audio.iter().fold(0u64, |hash, x| {
+            hash.wrapping_mul(31) ^ u64::from(x.to_bits())
+        }));
+        engine.note_off(1, 48);
+        audio.fill(0.0);
+        engine.render(&mut audio, 2);
+        assert!(audio.iter().all(|x| x.is_finite()));
+    }
+    assert_eq!(hashes.len(), 13);
+}
+
+#[test]
+fn gen_midi_sources_two_and_sixteen_share_pitch_but_not_sustain_or_panic() {
+    for model in [0.0, 1.0] {
+        let mut song = Song::default();
+        song.add_channel(ChannelKind::Synth(SynthKind::Gen));
+        let module = &mut song.channels[1].rack.modules[0];
+        module.params[56] = model;
+        module.params[54] = 0.5;
+        for op in 0..4 {
+            module.params[18 + 8 * op] = 0.0;
+            module.params[66 + 10 * op] = 1.0;
+        }
+        let mut engine = SongAudioEngine::new(&song, 48000.0).unwrap();
+        let mut audio = vec![0.0; 12000];
+        let index = (0..engine.meter_count())
+            .find(|&i| {
+                let k = engine.meter_key(i);
+                k.channel == 1 && k.instance_id == 2
+            })
+            .unwrap();
+        engine.midi_note(1, 1, 60, Some(0.8));
+        engine.midi_note(1, 15, 60, Some(0.8));
+        engine.render(&mut audio, 2);
+        assert_eq!(&engine.analysis(index)[..2], &[1.0, 1.0]);
+        engine.midi_controller(1, 15, 71, 1.0);
+        engine.midi_note(1, 15, 60, None);
+        engine.midi_controller(1, 1, 127, 0.0);
+        engine.render(&mut audio, 2);
+        assert_eq!(&engine.analysis(index)[..2], &[0.0, 1.0]);
+        engine.midi_controller(1, 15, 130, 0.0);
+        engine.render(&mut audio, 2);
+        assert_eq!(engine.analysis(index)[1], 1.0);
+        engine.midi_controller(1, 15, 71, 0.0);
+        engine.render(&mut audio, 2);
+        assert!(engine.analysis(index)[..6].iter().all(|v| *v == 0.0));
+    }
+}
+
+#[test]
+fn gen_piano_roll_channel_sixteen_survives_save_seek_and_release() {
+    use honeydew::song::{Event, PPQ};
+    let mut song = Song::default();
+    song.add_channel(ChannelKind::Synth(SynthKind::Gen));
+    for op in 0..4 {
+        song.channels[1].rack.modules[0].params[18 + 8 * op] = 0.0;
+    }
+    for (index, midi) in [1, 15].into_iter().enumerate() {
+        let lane = if index == 0 {
+            0
+        } else {
+            song.channels[1].add_lane(LaneKind::Notes)
+        };
+        let lane = &mut song.channels[1].lanes[lane];
+        lane.set_midi_channel(Some(midi));
+        lane.add_clip(0, 8.0).events.push(Event::Note {
+            pos: index as u32 * 2 * PPQ,
+            len_beats: 1.5,
+            key: 60,
+            velocity: 220,
+            pan: 127,
+            slide: false,
+        });
+    }
+    let song = flm::read(&flm::write(&song).unwrap()).unwrap();
+    assert_eq!(song.channels[1].lanes[1].midi_channel(), Some(15));
+    let mut engine = SongAudioEngine::new(&song, 48000.0).unwrap();
+    let index = (0..engine.meter_count())
+        .find(|&i| {
+            let k = engine.meter_key(i);
+            k.channel == 1 && k.instance_id == 2
+        })
+        .unwrap();
+    let mut audio = vec![0.0; 48000];
+    engine.play();
+    engine.render(&mut audio[..1024], 2);
+    assert_eq!(engine.analysis(index)[0], 1.0);
+    engine.seek(u64::from(PPQ) * 2);
+    engine.render(&mut audio, 2);
+    assert_eq!(engine.analysis(index)[1], 1.0);
+    engine.seek(u64::from(PPQ) * 4);
+    engine.render(&mut audio, 2);
+    assert!(engine.analysis(index)[..6].iter().all(|v| *v == 0.0));
+}

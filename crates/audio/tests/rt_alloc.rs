@@ -755,3 +755,44 @@ fn vocal_tune_and_gameboy_callbacks_allocate_nothing() {
         "new DSP paths allocated or freed inside the callback"
     );
 }
+
+#[test]
+fn gen_models_register_automation_retrigger_and_panics_allocate_nothing() {
+    use honeydew_audio::{
+        r#gen::{Gen, NUM_PARAMS},
+        instrument::Instrument,
+    };
+    let mut instrument = Gen::new(SAMPLE_RATE);
+    let (mut left, mut right) = ([0.0; 257], [0.0; 257]);
+    let context = ProcessContext {
+        sample_rate: SAMPLE_RATE,
+        tempo_bpm: 120.0,
+        start_beat: 0.0,
+        playing: true,
+    };
+    let calls = allocator_calls(|| {
+        for model in [0.0, 1.0, 0.0] {
+            instrument.set_parameter(56, model);
+            instrument.set_parameter(58, model);
+            for midi in 0..16 {
+                for p in 1..NUM_PARAMS {
+                    instrument.set_parameter(p, ((p + midi as usize) % 17) as f32 / 16.0);
+                }
+                instrument.set_parameter(56, model);
+                instrument.set_parameter(58, model);
+                instrument.note_on_midi(midi, 60, 0.8, 0.4);
+                instrument.set_midi_controller(midi, 4, 0.6);
+                instrument.set_midi_controller(midi, 71, 1.0);
+                instrument.process(&mut left, &mut right, context);
+                instrument.note_off_midi(midi, 60);
+                instrument.set_midi_controller(midi, 130, 0.0);
+                instrument.set_midi_controller(midi, 71, 0.0);
+                instrument.set_midi_controller(midi, 127, 0.0);
+            }
+        }
+        instrument.all_notes_off();
+        instrument.reset();
+    });
+    assert_eq!(calls, 0);
+    assert!(left.iter().chain(&right).all(|v| v.is_finite()));
+}

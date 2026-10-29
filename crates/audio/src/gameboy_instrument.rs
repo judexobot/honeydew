@@ -548,7 +548,10 @@ impl Instrument for GameBoyInstrument {
             }
         }
         if index == 127 || index == 130 {
-            self.pedals[midi as usize] = false;
+            // CC120 is immediate; CC123 releases keys while retaining the sustain pedal.
+            if index == 127 {
+                self.pedals[midi as usize] = false;
+            }
             for key in 0..128 {
                 self.off(Some(midi), key as u8);
             }
@@ -750,5 +753,29 @@ mod midi_tests {
         apu.set_midi_controller(0, 127, 0.0);
         assert!(!apu.voices.iter().any(|v| v.midi == 0 && v.key.is_some()));
         assert!(apu.voices.iter().any(|v| v.midi == 1 && v.key == Some(60)));
+    }
+}
+
+#[cfg(test)]
+mod midi_release_tests {
+    use super::*;
+    #[test]
+    fn all_notes_off_retains_sustain_but_all_sound_off_clears_it() {
+        for mode in [0.0, 1.0] {
+            let mut instrument = GameBoyInstrument::new(48000.0);
+            instrument.set_parameter(MODE, mode);
+            instrument.note_on_midi(1, 60, 1.0, 0.5);
+            instrument.set_midi_controller(1, 71, 1.0);
+            instrument.set_midi_controller(1, 130, 0.0);
+            assert!(instrument.pedals[1]);
+            if mode >= 0.5 {
+                assert!(instrument.voices.iter().any(|v| v.pending));
+            } else {
+                assert!(instrument.deferred[1][60]);
+            }
+            instrument.set_midi_controller(1, 127, 0.0);
+            assert!(!instrument.pedals[1]);
+            assert!(!instrument.deferred[1][60]);
+        }
     }
 }
