@@ -461,7 +461,7 @@ impl AudioEffect {
                 Processor::Tremolo(TremoloState::default()),
             ),
             53 => {
-                let params = vec![1.0, 0.0, 0.0, 1.0, 0.25, 1.0];
+                let params = vec![1.0, 0.0, 0.0, 1.0, 0.25, 1.0, 0.2, 0.5, 0.1, 0.5, 0.0, 0.5];
                 let rate = sample_rate as u32;
                 if (rate as f32 - sample_rate).abs() > 0.001 {
                     return Err(EffectError::InvalidSampleRate);
