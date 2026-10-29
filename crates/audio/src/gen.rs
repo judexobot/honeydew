@@ -92,14 +92,14 @@ impl Operator {
 #[derive(Clone, Copy)]
 struct Voice {
     key: Option<u8>, midi: u8, velocity: f32, pan: f32,
-    age: u64, base_hz: f32, glide_hz: f32, feedback: f32,
+    age: u64, base_hz: f32, glide_hz: f32, feedback: f32, deferred: bool,
     ops: [Operator; 4],
 }
 impl Default for Voice {
     fn default() -> Self {
         Self { key: None, midi: 0, velocity: 0.0, pan: 0.5,
             age: 0, base_hz: 440.0, glide_hz: 440.0,
-            feedback: 0.0, ops: [Operator::default(); 4] }
+            feedback: 0.0, deferred: false, ops: [Operator::default(); 4] }
     }
 }
 impl Voice {
@@ -114,9 +114,10 @@ impl Voice {
         self.pan = pan.clamp(0.0, 1.0);
         self.age = age;
         self.feedback = 0.0;
+        self.deferred = false;
         for op in &mut self.ops { op.on(); }
     }
-    fn off(&mut self) { self.key = None; for op in &mut self.ops { op.off(); } }
+    fn off(&mut self) { self.key = None; self.deferred = false; for op in &mut self.ops { op.off(); } }
     fn render(&mut self, params: &[f32; NUM_PARAMS], rate: f32, lfo: f32, bend: f32) -> f32 {
         if !self.playing() { return 0.0; }
         let glide = params[52] * params[52] * 0.4;
@@ -171,11 +172,21 @@ impl Voice {
     }
 }
 fn midi_frequency(key: u8) -> f32 { 440.0 * 2.0f32.powf((key as f32 - 69.0) / 12.0) }
+/// Bandlimiting step correction for PSG square-wave discontinuities.
+fn poly_blep(t: f32, dt: f32) -> f32 {
+    if t < dt {
+        let x = t / dt;
+        x + x - x * x - 1.0
+    } else if t > 1.0 - dt {
+        let x = (t - 1.0) / dt;
+        x * x + x + x + 1.0
+    } else { 0.0 }
+}
 
 #[derive(Clone, Copy)]
-struct Tone { key: Option<u8>, midi: u8, phase: f32, pan: f32, velocity: f32, age: u64 }
+struct Tone { key: Option<u8>, midi: u8, phase: f32, pan: f32, velocity: f32, age: u64, deferred: bool }
 impl Default for Tone {
-    fn default() -> Self { Self { key: None, midi: 0, phase: 0.0, pan: 0.5, velocity: 0.0, age: 0 } }
+    fn default() -> Self { Self { key: None, midi: 0, phase: 0.0, pan: 0.5, velocity: 0.0, age: 0, deferred: false } }
 }
 pub struct Gen {
     rate: f32, params: [f32; NUM_PARAMS], voices: [Voice; 6],
@@ -201,18 +212,19 @@ impl Gen {
         self.voices[idx].on(midi, key, velocity, pan, self.age, self.params[52] > 0.0);
         let idx = self.tones.iter().position(|t| t.key.is_none())
             .unwrap_or_else(|| self.tones.iter().enumerate().min_by_key(|(_,t)| t.age).map_or(0, |(i,_)| i));
-        self.tones[idx] = Tone { key: Some(key), midi, phase: 0.0, pan, velocity, age: self.age };
+        self.tones[idx] = Tone { key: Some(key), midi, phase: 0.0, pan, velocity, age: self.age, deferred: false };
         self.noise_on = true;
     }
     fn release(&mut self, midi: Option<u8>, key: u8) {
         for v in &mut self.voices {
-            if v.key == Some(key) && midi.is_none_or(|m| v.midi == m) && !self.pedals[v.midi as usize] {
-                v.off();
+            if v.key == Some(key) && midi.is_none_or(|m| v.midi == m) {
+                if self.pedals[v.midi as usize] { v.deferred = true; } else { v.off(); }
             }
         }
         for tone in &mut self.tones {
-            if tone.key == Some(key) && midi.is_none_or(|m| tone.midi == m) && !self.pedals[tone.midi as usize] {
-                tone.key = None;
+            if tone.key == Some(key) && midi.is_none_or(|m| tone.midi == m) {
+                if self.pedals[tone.midi as usize] { tone.deferred = true; }
+                else { tone.key = None; tone.deferred = false; }
             }
         }
         self.noise_on = self.tones.iter().any(|t| t.key.is_some());
@@ -224,8 +236,12 @@ impl Gen {
             if let Some(key) = tone.key {
                 let bend = self.bend[tone.midi as usize] * (1.0 + 12.0 * self.params[51]);
                 let hz = midi_frequency(key) * 2.0f32.powf(bend / 12.0);
-                tone.phase = (tone.phase + hz / self.rate).fract();
-                let signal = if tone.phase < 0.5 { 1.0 } else { -1.0 };
+                // PolyBLEP suppresses the most severe stair-step aliasing at PSG square edges.
+                let dt = (hz / self.rate).clamp(0.000001, 0.49);
+                tone.phase = (tone.phase + dt).fract();
+                let signal = (if tone.phase < 0.5 { 1.0 } else { -1.0 })
+                    + poly_blep(tone.phase, dt)
+                    - poly_blep((tone.phase + 0.5).fract(), dt);
                 let gain = self.params[44+i] * tone.velocity * 0.65;
                 let pos = (tone.pan - 0.5) * self.params[50] + 0.5;
                 lr[0] += signal * gain * (1.0 - pos);
@@ -262,8 +278,12 @@ impl Instrument for Gen {
         if index == 71 {
             self.pedals[midi as usize] = value >= 0.5;
             if value < 0.5 {
-                for v in &mut self.voices { if v.midi == midi { v.off(); } }
-                for t in &mut self.tones { if t.midi == midi { t.key = None; } }
+                // Pedal-up releases only deferred note-offs; keys still held keep sounding.
+                for v in &mut self.voices { if v.midi == midi && v.deferred { v.off(); } }
+                for t in &mut self.tones {
+                    if t.midi == midi && t.deferred { t.key = None; t.deferred = false; }
+                }
+                self.noise_on = self.tones.iter().any(|t| t.key.is_some());
             }
         }
     }
@@ -338,6 +358,28 @@ mod tests {
             g.process(&mut l,&mut r,CTX);
             assert!(l.iter().any(|x| x.abs()>0.00001), "algorithm {i}");
         }
+    }
+    #[test] fn pedal_does_not_cut_keys_that_are_still_held() {
+        let mut g = Gen::new(48000.0);
+        g.note_on_midi(1, 60, 0.8, 0.5);
+        g.note_on_midi(1, 64, 0.8, 0.5);
+        g.set_midi_controller(1, 71, 1.0); // CC64 sustain down
+        g.note_off_midi(1, 60);
+        assert!(g.voices.iter().any(|v| v.key == Some(60) && v.deferred));
+        assert!(g.voices.iter().any(|v| v.key == Some(64) && !v.deferred));
+        g.set_midi_controller(1, 71, 0.0); // pedal up
+        assert!(!g.voices.iter().any(|v| v.key == Some(60)));
+        assert!(g.voices.iter().any(|v| v.key == Some(64)));
+        assert!(g.tones.iter().any(|t| t.key == Some(64)));
+    }
+    #[test] fn high_psg_notes_remain_finite() {
+        let mut g = Gen::new(48000.0);
+        g.set_parameter(54, 1.0);
+        g.note_on(108, 1.0, 0.5);
+        let (mut l, mut r) = (vec![0.0; 4096], vec![0.0; 4096]);
+        g.process(&mut l, &mut r, CTX);
+        assert!(l.iter().all(|x| x.is_finite()));
+        assert!(l.iter().any(|x| x.abs() > 0.001));
     }
     #[test] fn psg_only_produces_square_wave() {
         let mut g = Gen::new(48000.0);
