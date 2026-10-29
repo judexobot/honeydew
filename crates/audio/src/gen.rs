@@ -69,7 +69,7 @@ impl Operator {
         let attack = 0.002 + params[i + 3] * params[i + 3] * 3.0;
         let decay = 0.006 + params[i + 4] * params[i + 4] * 5.0;
         let sustain = params[i + 5];
-        let release = 0.008 + params[i + 6] * params[i + 6] * 7.0;
+        let release = (0.008 + params[i + 6] * params[i + 6] * 7.0) * (1.0 + params[53] * 3.0);
         match self.stage {
             Stage::Attack => {
                 self.env = (self.env + 1.0 / (rate * attack)).min(1.0);
