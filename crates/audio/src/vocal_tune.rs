@@ -348,8 +348,7 @@ impl VocalTune {
         // Smooth pitch confidence, consonant protection and Wet automation together.
         // Abrupt detector changes must never hard-switch the spectral output against the dry voice.
         let consonant_alpha = 1.0 - (-1.0 / (self.rate * 0.008)).exp();
-        self.sibilance_smoothed +=
-            (self.sibilance - self.sibilance_smoothed) * consonant_alpha;
+        self.sibilance_smoothed += (self.sibilance - self.sibilance_smoothed) * consonant_alpha;
         let confidence = ((self.clarity - 0.28) / 0.52).clamp(0.0, 1.0);
         let target_mix = self.params.wet
             * self.voiced
