@@ -59,7 +59,13 @@ const OVERVIEW: [(u16, &str, &str, usize, &[&str]); 10] = [
         87,
         &["PULSE 1", "PULSE 2", "WAVE", "NOISE", "MIX"],
     ),
-    (55, "Gen", "Gen", 56, &["FM", "OP1", "OP2", "OP3", "OP4", "LFO", "PSG", "OUTPUT"]),
+    (
+        55,
+        "Gen",
+        "Gen",
+        106,
+        &["FM", "OP1", "OP2", "OP3", "OP4", "LFO", "PSG", "OUTPUT"],
+    ),
 ];
 
 fn spec(id: u16) -> &'static ModuleSpec {

@@ -1316,11 +1316,23 @@ const GAMEBOY_APU: &[P] = &[
     ),
 ];
 
-
 // Gen: dedicated FM/PSG synthesizer, module type 55. IDs and defaults mirror honeydew_audio::gen.
 const GEN: &[P] = &[
     P::ENABLE, // 0
-    P::menu("Algorithm", 0.0, &["1 Serial", "2 Branch", "3 Split", "4 Chain", "5 Dual", "6 Fan", "7 Mix", "8 Parallel"]), // 1
+    P::menu(
+        "Algorithm",
+        0.0,
+        &[
+            "1 Serial",
+            "2 Branch",
+            "3 Split",
+            "4 Chain",
+            "5 Dual",
+            "6 Fan",
+            "7 Mix",
+            "8 Parallel",
+        ],
+    ), // 1
     P::cont("Feedback", 0.30, Display::linear(0.0, 100.0, 0, "%")), // 2
     P::cont("Master", 0.65, Display::linear(0.0, 100.0, 0, "%")), // 3
     P::cont("FM Level", 0.88, Display::linear(0.0, 100.0, 0, "%")), // 4
@@ -1331,7 +1343,13 @@ const GEN: &[P] = &[
     P::cont("Drive", 0.0, Display::linear(0.0, 100.0, 0, "%")), // 9
     P::cont("DAC Color", 0.0, Display::linear(0.0, 100.0, 0, "%")), // 10
     P::cont("Stereo Width", 0.5, Display::linear(0.0, 100.0, 0, "%")), // 11
-    P::menu("OP1 Ratio", 1.0 / 11.0, &["0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12"]), // 12
+    P::menu(
+        "OP1 Ratio",
+        1.0 / 11.0,
+        &[
+            "0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12",
+        ],
+    ), // 12
     P::cont("OP1 Detune", 0.5, Display::linear(-100.0, 100.0, 0, " c")), // 13
     P::cont("OP1 Level", 0.55, Display::linear(0.0, 100.0, 0, "%")), // 14
     P::cont("OP1 Attack", 0.06, Display::linear(0.0, 100.0, 0, "%")), // 15
@@ -1339,7 +1357,13 @@ const GEN: &[P] = &[
     P::cont("OP1 Sustain", 0.7, Display::linear(0.0, 100.0, 0, "%")), // 17
     P::cont("OP1 Release", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 18
     P::cont("OP1 AM", 0.0, Display::linear(0.0, 100.0, 0, "%")), // 19
-    P::menu("OP2 Ratio", 1.0 / 11.0, &["0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12"]), // 20
+    P::menu(
+        "OP2 Ratio",
+        1.0 / 11.0,
+        &[
+            "0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12",
+        ],
+    ), // 20
     P::cont("OP2 Detune", 0.5, Display::linear(-100.0, 100.0, 0, " c")), // 21
     P::cont("OP2 Level", 0.55, Display::linear(0.0, 100.0, 0, "%")), // 22
     P::cont("OP2 Attack", 0.06, Display::linear(0.0, 100.0, 0, "%")), // 23
@@ -1347,7 +1371,13 @@ const GEN: &[P] = &[
     P::cont("OP2 Sustain", 0.7, Display::linear(0.0, 100.0, 0, "%")), // 25
     P::cont("OP2 Release", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 26
     P::cont("OP2 AM", 0.0, Display::linear(0.0, 100.0, 0, "%")), // 27
-    P::menu("OP3 Ratio", 1.0 / 11.0, &["0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12"]), // 28
+    P::menu(
+        "OP3 Ratio",
+        1.0 / 11.0,
+        &[
+            "0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12",
+        ],
+    ), // 28
     P::cont("OP3 Detune", 0.5, Display::linear(-100.0, 100.0, 0, " c")), // 29
     P::cont("OP3 Level", 0.55, Display::linear(0.0, 100.0, 0, "%")), // 30
     P::cont("OP3 Attack", 0.06, Display::linear(0.0, 100.0, 0, "%")), // 31
@@ -1355,7 +1385,13 @@ const GEN: &[P] = &[
     P::cont("OP3 Sustain", 0.7, Display::linear(0.0, 100.0, 0, "%")), // 33
     P::cont("OP3 Release", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 34
     P::cont("OP3 AM", 0.0, Display::linear(0.0, 100.0, 0, "%")), // 35
-    P::menu("OP4 Ratio", 1.0 / 11.0, &["0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12"]), // 36
+    P::menu(
+        "OP4 Ratio",
+        1.0 / 11.0,
+        &[
+            "0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12",
+        ],
+    ), // 36
     P::cont("OP4 Detune", 0.5, Display::linear(-100.0, 100.0, 0, " c")), // 37
     P::cont("OP4 Level", 0.82, Display::linear(0.0, 100.0, 0, "%")), // 38
     P::cont("OP4 Attack", 0.06, Display::linear(0.0, 100.0, 0, "%")), // 39
@@ -1375,6 +1411,282 @@ const GEN: &[P] = &[
     P::cont("Release Tail", 0.0, Display::linear(0.0, 100.0, 0, "%")), // 53
     P::menu("Engine", 0.0, &["FM + PSG", "FM", "PSG"]), // 54
     P::cont("Trim", 0.5, Display::linear(-12.0, 12.0, 0, " dB")), // 55
+    P::menu(
+        "Synthesis Model",
+        honeydew_audio::r#gen::DEFAULTS[56],
+        &["Legacy", "YM2612"],
+    ),
+    P::menu(
+        "Chip Region",
+        honeydew_audio::r#gen::DEFAULTS[57],
+        &["NTSC", "PAL"],
+    ),
+    P::menu(
+        "PSG Model",
+        honeydew_audio::r#gen::DEFAULTS[58],
+        &["Modern", "Clocked Sega"],
+    ),
+    P::menu(
+        "PSG Noise Clock",
+        honeydew_audio::r#gen::DEFAULTS[59],
+        &["Clock / 512", "Clock / 1024", "Clock / 2048", "Tone C"],
+    ),
+    P::menu(
+        "Chip LFO Rate",
+        honeydew_audio::r#gen::DEFAULTS[60],
+        &[
+            "Follow Hz",
+            "Rate 0",
+            "Rate 1",
+            "Rate 2",
+            "Rate 3",
+            "Rate 4",
+            "Rate 5",
+            "Rate 6",
+            "Rate 7",
+        ],
+    ),
+    P::cont(
+        "Chip Velocity",
+        honeydew_audio::r#gen::DEFAULTS[61],
+        Display::linear(0.0, 100.0, 0, "%"),
+    ),
+    P::cont(
+        "OP1 AR",
+        honeydew_audio::r#gen::DEFAULTS[62],
+        Display::linear(0.0, 31.0, 0, ""),
+    ),
+    P::cont(
+        "OP1 DR",
+        honeydew_audio::r#gen::DEFAULTS[63],
+        Display::linear(0.0, 31.0, 0, ""),
+    ),
+    P::cont(
+        "OP1 SR",
+        honeydew_audio::r#gen::DEFAULTS[64],
+        Display::linear(0.0, 31.0, 0, ""),
+    ),
+    P::menu(
+        "OP1 SL",
+        honeydew_audio::r#gen::DEFAULTS[65],
+        &[
+            "0 dB", "3 dB", "6 dB", "9 dB", "12 dB", "15 dB", "18 dB", "21 dB", "24 dB", "27 dB",
+            "30 dB", "33 dB", "36 dB", "39 dB", "42 dB", "93 dB",
+        ],
+    ),
+    P::cont(
+        "OP1 RR",
+        honeydew_audio::r#gen::DEFAULTS[66],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "OP1 RS",
+        honeydew_audio::r#gen::DEFAULTS[67],
+        Display::linear(0.0, 3.0, 0, ""),
+    ),
+    P::cont(
+        "OP1 TL",
+        honeydew_audio::r#gen::DEFAULTS[68],
+        Display::linear(0.0, 127.0, 0, ""),
+    ),
+    P::menu(
+        "OP1 DT",
+        honeydew_audio::r#gen::DEFAULTS[69],
+        &["0", "+1", "+2", "+3", "-0", "-1", "-2", "-3"],
+    ),
+    P::menu(
+        "OP1 SSG-EG",
+        honeydew_audio::r#gen::DEFAULTS[70],
+        &[
+            "Off", "Shape 8", "Shape 9", "Shape A", "Shape B", "Shape C", "Shape D", "Shape E",
+            "Shape F",
+        ],
+    ),
+    P::menu(
+        "OP1 MUL",
+        honeydew_audio::r#gen::DEFAULTS[71],
+        &[
+            "0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15",
+        ],
+    ),
+    P::cont(
+        "OP2 AR",
+        honeydew_audio::r#gen::DEFAULTS[72],
+        Display::linear(0.0, 31.0, 0, ""),
+    ),
+    P::cont(
+        "OP2 DR",
+        honeydew_audio::r#gen::DEFAULTS[73],
+        Display::linear(0.0, 31.0, 0, ""),
+    ),
+    P::cont(
+        "OP2 SR",
+        honeydew_audio::r#gen::DEFAULTS[74],
+        Display::linear(0.0, 31.0, 0, ""),
+    ),
+    P::menu(
+        "OP2 SL",
+        honeydew_audio::r#gen::DEFAULTS[75],
+        &[
+            "0 dB", "3 dB", "6 dB", "9 dB", "12 dB", "15 dB", "18 dB", "21 dB", "24 dB", "27 dB",
+            "30 dB", "33 dB", "36 dB", "39 dB", "42 dB", "93 dB",
+        ],
+    ),
+    P::cont(
+        "OP2 RR",
+        honeydew_audio::r#gen::DEFAULTS[76],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "OP2 RS",
+        honeydew_audio::r#gen::DEFAULTS[77],
+        Display::linear(0.0, 3.0, 0, ""),
+    ),
+    P::cont(
+        "OP2 TL",
+        honeydew_audio::r#gen::DEFAULTS[78],
+        Display::linear(0.0, 127.0, 0, ""),
+    ),
+    P::menu(
+        "OP2 DT",
+        honeydew_audio::r#gen::DEFAULTS[79],
+        &["0", "+1", "+2", "+3", "-0", "-1", "-2", "-3"],
+    ),
+    P::menu(
+        "OP2 SSG-EG",
+        honeydew_audio::r#gen::DEFAULTS[80],
+        &[
+            "Off", "Shape 8", "Shape 9", "Shape A", "Shape B", "Shape C", "Shape D", "Shape E",
+            "Shape F",
+        ],
+    ),
+    P::menu(
+        "OP2 MUL",
+        honeydew_audio::r#gen::DEFAULTS[81],
+        &[
+            "0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15",
+        ],
+    ),
+    P::cont(
+        "OP3 AR",
+        honeydew_audio::r#gen::DEFAULTS[82],
+        Display::linear(0.0, 31.0, 0, ""),
+    ),
+    P::cont(
+        "OP3 DR",
+        honeydew_audio::r#gen::DEFAULTS[83],
+        Display::linear(0.0, 31.0, 0, ""),
+    ),
+    P::cont(
+        "OP3 SR",
+        honeydew_audio::r#gen::DEFAULTS[84],
+        Display::linear(0.0, 31.0, 0, ""),
+    ),
+    P::menu(
+        "OP3 SL",
+        honeydew_audio::r#gen::DEFAULTS[85],
+        &[
+            "0 dB", "3 dB", "6 dB", "9 dB", "12 dB", "15 dB", "18 dB", "21 dB", "24 dB", "27 dB",
+            "30 dB", "33 dB", "36 dB", "39 dB", "42 dB", "93 dB",
+        ],
+    ),
+    P::cont(
+        "OP3 RR",
+        honeydew_audio::r#gen::DEFAULTS[86],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "OP3 RS",
+        honeydew_audio::r#gen::DEFAULTS[87],
+        Display::linear(0.0, 3.0, 0, ""),
+    ),
+    P::cont(
+        "OP3 TL",
+        honeydew_audio::r#gen::DEFAULTS[88],
+        Display::linear(0.0, 127.0, 0, ""),
+    ),
+    P::menu(
+        "OP3 DT",
+        honeydew_audio::r#gen::DEFAULTS[89],
+        &["0", "+1", "+2", "+3", "-0", "-1", "-2", "-3"],
+    ),
+    P::menu(
+        "OP3 SSG-EG",
+        honeydew_audio::r#gen::DEFAULTS[90],
+        &[
+            "Off", "Shape 8", "Shape 9", "Shape A", "Shape B", "Shape C", "Shape D", "Shape E",
+            "Shape F",
+        ],
+    ),
+    P::menu(
+        "OP3 MUL",
+        honeydew_audio::r#gen::DEFAULTS[91],
+        &[
+            "0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15",
+        ],
+    ),
+    P::cont(
+        "OP4 AR",
+        honeydew_audio::r#gen::DEFAULTS[92],
+        Display::linear(0.0, 31.0, 0, ""),
+    ),
+    P::cont(
+        "OP4 DR",
+        honeydew_audio::r#gen::DEFAULTS[93],
+        Display::linear(0.0, 31.0, 0, ""),
+    ),
+    P::cont(
+        "OP4 SR",
+        honeydew_audio::r#gen::DEFAULTS[94],
+        Display::linear(0.0, 31.0, 0, ""),
+    ),
+    P::menu(
+        "OP4 SL",
+        honeydew_audio::r#gen::DEFAULTS[95],
+        &[
+            "0 dB", "3 dB", "6 dB", "9 dB", "12 dB", "15 dB", "18 dB", "21 dB", "24 dB", "27 dB",
+            "30 dB", "33 dB", "36 dB", "39 dB", "42 dB", "93 dB",
+        ],
+    ),
+    P::cont(
+        "OP4 RR",
+        honeydew_audio::r#gen::DEFAULTS[96],
+        Display::linear(0.0, 15.0, 0, ""),
+    ),
+    P::cont(
+        "OP4 RS",
+        honeydew_audio::r#gen::DEFAULTS[97],
+        Display::linear(0.0, 3.0, 0, ""),
+    ),
+    P::cont(
+        "OP4 TL",
+        honeydew_audio::r#gen::DEFAULTS[98],
+        Display::linear(0.0, 127.0, 0, ""),
+    ),
+    P::menu(
+        "OP4 DT",
+        honeydew_audio::r#gen::DEFAULTS[99],
+        &["0", "+1", "+2", "+3", "-0", "-1", "-2", "-3"],
+    ),
+    P::menu(
+        "OP4 SSG-EG",
+        honeydew_audio::r#gen::DEFAULTS[100],
+        &[
+            "Off", "Shape 8", "Shape 9", "Shape A", "Shape B", "Shape C", "Shape D", "Shape E",
+            "Shape F",
+        ],
+    ),
+    P::menu(
+        "OP4 MUL",
+        honeydew_audio::r#gen::DEFAULTS[101],
+        &[
+            "0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15",
+        ],
+    ),
+    P::toggle("OP1 AM Enable", 0.0),
+    P::toggle("OP2 AM Enable", 0.0),
+    P::toggle("OP3 AM Enable", 0.0),
+    P::toggle("OP4 AM Enable", 0.0),
 ];
 
 pub static MODULES: &[ModuleSpec] = &[
@@ -1435,5 +1747,11 @@ pub static MODULES: &[ModuleSpec] = &[
         GAMEBOY_APU,
         &["PULSE 1", "PULSE 2", "WAVE", "NOISE", "MIX"],
     ),
-    ModuleSpec::instrument(55, "Gen", "Gen", GEN, &["FM", "OP1", "OP2", "OP3", "OP4", "LFO", "PSG", "OUTPUT"]),
+    ModuleSpec::instrument(
+        55,
+        "Gen",
+        "Gen",
+        GEN,
+        &["FM", "OP1", "OP2", "OP3", "OP4", "LFO", "PSG", "OUTPUT"],
+    ),
 ];

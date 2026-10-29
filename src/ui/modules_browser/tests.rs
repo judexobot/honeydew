@@ -621,10 +621,18 @@ fn the_rows_are_drawn_in_order_down_the_list() {
     let rig = Rig::new();
     assert!(rig.shows("Modules") && rig.shows("Search") && rig.shows("Sort"));
     let list = rig.layout().list;
-    let ys: Vec<f32> = ["Paste", "Rack Preset", "SYNTH", "3x Osc", "ECHO"]
-        .iter()
-        .map(|t| rig.text_at(t).y)
-        .collect();
+    let ys: Vec<f32> = [
+        "Paste",
+        "Rack Preset",
+        "SYNTH",
+        "3x Osc",
+        "Game Boy APU",
+        "Gen",
+        "MiniSynth",
+    ]
+    .iter()
+    .map(|t| rig.text_at(t).y)
+    .collect();
     assert!(ys.windows(2).all(|w| w[1] > w[0]), "{ys:?}");
     // One row per 1.5 U, the first at the top of the list.
     assert_eq!(ys[0], list.top() + 24.0);
@@ -652,10 +660,14 @@ fn picking_an_effect_returns_its_id() {
 #[test]
 fn section_headers_pick_nothing_and_an_instrument_row_picks_its_module_id() {
     let mut rig = Rig::new();
+    rig.wheel(pos2(200.0, 480.0), -200.0);
     let at = rig.text_at("ECHO");
     assert_eq!(rig.click(at), None);
     for (name, id) in SYNTH_IDS {
         let mut rig = Rig::new();
+        if !rig.shows(name) || !rig.layout().list.shrink(8.0).contains(rig.text_at(name)) {
+            rig.wheel(pos2(200.0, 480.0), -200.0);
+        }
         let at = rig.text_at(name);
         assert_eq!(rig.click(at), Some(BrowserAction::Pick(id)), "{name}");
     }
@@ -1078,11 +1090,12 @@ impl Rig {
 /// shrunk to fit their button.
 #[test]
 fn every_row_is_in_fontsize_4_and_the_button_labels_in_8_pt() {
-    let rig = Rig::new();
+    let mut rig = Rig::new();
     let m = metrics();
     let pt = |s: FontSize| m.font_id(s).size;
     assert_eq!(rig.font_size("Game Boy APU"), pt(FontSize::Pt18));
     assert_eq!(rig.font_size("Paste"), pt(FontSize::Pt18));
+    rig.wheel(pos2(200.0, 480.0), -200.0);
     assert_eq!(rig.font_size("ECHO"), pt(FontSize::Pt12));
     let d = m.u(BUTTON_D);
     for label in ["Search", "Sort"] {

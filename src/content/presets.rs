@@ -26,6 +26,7 @@ use std::collections::HashMap;
 use std::iter::once;
 use std::path::Path;
 
+mod r#gen;
 mod gm_synth;
 mod three_osc;
 
@@ -56,6 +57,7 @@ fn banks() -> impl Iterator<Item = (u16, &'static [Preset])> {
         .chain(once((39, three_osc::BANK)))
         .chain(once((53, VOCALTUNE)))
         .chain(once((54, GAMEBOY)))
+        .chain(once((55, r#gen::BANK)))
 }
 
 /// The param `name` names in `spec`, as [`ModuleInstance::param`] indexes it: `#n` (digits only), or the one param or

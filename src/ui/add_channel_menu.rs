@@ -99,6 +99,7 @@ mod tests {
                 (1, 7, "3x Osc"),
                 (1, 8, "SoundFont Player"),
                 (1, 9, "Game Boy APU"),
+                (1, 10, "Gen"),
             ]
         );
     }

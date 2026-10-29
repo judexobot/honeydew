@@ -5,6 +5,16 @@ This app includes the third-party software below, each under its own license.
 The Honeydew logo (`assets/branding/`) is a derivative of "Melon" by afitrose, licensed as Free for commercial use WITH
 ATTRIBUTION; see [`assets/branding/README.md`](assets/branding/README.md).
 
+## Nuked-OPN2 1.0.9 (optional Gen YM2612 model)
+
+- Source: <https://github.com/nukeykt/Nuked-OPN2>, commit `335747d78cb0abbc3b55b004e62dad9763140115`.
+- Copyright (C) 2017–2022 Alexey Khokholov (Nuke.YKT).
+- License: LGPL-2.1-or-later, in [`vendor/nuked-opn2/LICENSE`](vendor/nuked-opn2/LICENSE).
+- The original C core and header are unmodified. Honeydew's separate adapter adds a bounded register bus,
+  retrigger scheduling, telemetry and host pan; see [`vendor/nuked-opn2/README.honeydew.md`](vendor/nuked-opn2/README.honeydew.md).
+  The instrument uses YM2612 mode, resampling and an approximate external high-pass stage. The SN76489-style PSG
+  is an independent implementation. Neither engine is claimed to reproduce the entire console with 100% fidelity.
+
 ## Lemon Studio `os-flp` (FL Studio project files)
 
 - Source: Lemon Studio by ItsAlphaNeon (<https://github.com/ItsAlphaNeon/Lemon-Studio>), `crates/os-flp`.

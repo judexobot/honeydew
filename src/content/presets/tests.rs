@@ -26,6 +26,7 @@ fn counts(bank: &[Preset]) -> Vec<(&'static str, usize)> {
 
 #[test]
 fn the_banks_hold_the_planned_presets_per_category() {
+    assert_eq!(bank(55).len(), 13);
     assert_eq!(
         counts(bank(0)),
         [("Bass", 3), ("Keys", 3), ("Lead", 3), ("Pad", 3)]

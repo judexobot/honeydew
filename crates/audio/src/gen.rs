@@ -8,7 +8,7 @@ use psg::Psg;
 use std::f32::consts::TAU;
 use ym2612::Ym2612;
 
-pub const NUM_PARAMS: usize = 102;
+pub const NUM_PARAMS: usize = 106;
 pub const MODEL: usize = 56;
 pub const REGION: usize = 57;
 pub const PSG_MODEL: usize = 58;
@@ -494,7 +494,7 @@ impl Gen {
                 .write(0x50 + register, (q(e + 5, 3.0) << 6) | q(e, 31.0));
             self.chip.write(
                 0x60 + register,
-                (u8::from(self.params[OP_START + op * OP_STRIDE + 7] >= 0.5) << 7) | q(e + 1, 31.0),
+                (u8::from(self.params[102 + op] >= 0.5) << 7) | q(e + 1, 31.0),
             );
             self.chip.write(0x70 + register, q(e + 2, 31.0));
             let release = (f32::from(q(e + 4, 15.0)) / (1.0 + 3.0 * self.params[53])).round() as u8;
@@ -511,7 +511,7 @@ impl Gen {
         self.chip.pan(ch, pan);
         self.chip
             .write(bank + 0xb4 + channel, 0xc0 | (q(8, 3.0) << 4) | q(7, 7.0));
-        const LFO: [f32; 8] = [3.98, 5.56, 6.02, 6.37, 6.88, 9.63, 48.1, 72.2];
+        const LFO: [f32; 8] = [3.82, 5.33, 5.77, 6.11, 6.60, 9.23, 46.11, 69.22];
         let pick = q(60, 8.0);
         let lfo = if pick > 0 {
             pick - 1
