@@ -1,0 +1,70 @@
+name: Gen + VocalTune Android ARM64
+on:
+  push:
+    branches: [feature/gen-fm-vocaltune-pro]
+  workflow_dispatch:
+concurrency:
+  group: gen-vocaltune-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+env:
+  CARGO_BUILD_JOBS: 2
+  CARGO_TERM_COLOR: always
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Development libraries
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libclang-dev
+      - name: Test Gen FM/PSG and VocalTune DSP
+        run: |
+          cargo test -p honeydew-audio --locked --lib gen::tests
+          cargo test -p honeydew-audio --locked --lib vocal_tune::tests
+      - name: Test instrument UI, sound, routing and persistence
+        run: |
+          cargo test -p honeydew --locked --lib every_panel_matches_its_reference
+          cargo test --locked --test integration_instruments
+          cargo test -p honeydew --locked --lib overview_matches_the_registry
+          cargo test -p honeydew --locked --lib a_synth_channel_starts_with_its_instrument_module
+      - name: Rust warnings
+        run: cargo clippy -p honeydew-audio -p honeydew --all-targets --locked -- -D warnings
+  android:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: gen-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Android dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y libclang-dev
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.0.13004108'
+          cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Signed debug Android APK
+        run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.0.13004108" tools/android-dist.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Honeydew-Gen-VocalTune-GameBoy-Android-arm64-debug
+          path: target/honeydew-android-*-arm64-debug.apk
+          if-no-files-found: error
+          retention-days: 7
