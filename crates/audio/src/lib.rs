@@ -12,7 +12,7 @@ pub mod dwp;
 pub mod flac_writer;
 pub mod gameboy_apu;
 pub mod gameboy_instrument;
-pub mod gen;
+pub mod r#gen;
 pub mod gm_waveshapes;
 pub mod gmsynth;
 pub mod input;

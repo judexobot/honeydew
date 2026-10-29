@@ -3,7 +3,7 @@
 
 mod dw_sampler;
 mod gameboy_apu;
-mod gen;
+mod r#gen;
 mod gm_synth;
 mod mini_synth;
 pub(crate) mod slicer;
