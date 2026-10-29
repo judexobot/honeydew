@@ -1338,7 +1338,7 @@ const GEN: &[P] = &[
     P::cont("OP1 Decay", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 16
     P::cont("OP1 Sustain", 0.7, Display::linear(0.0, 100.0, 0, "%")), // 17
     P::cont("OP1 Release", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 18
-    P::cont("OP1 AM", 0, Display::linear(0.0, 100.0, 0, "%")), // 19
+    P::cont("OP1 AM", 0.0, Display::linear(0.0, 100.0, 0, "%")), // 19
     P::menu("OP2 Ratio", 1.0 / 11.0, &["0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12"]), // 20
     P::cont("OP2 Detune", 0.5, Display::linear(-100.0, 100.0, 0, " c")), // 21
     P::cont("OP2 Level", 0.55, Display::linear(0.0, 100.0, 0, "%")), // 22
@@ -1346,7 +1346,7 @@ const GEN: &[P] = &[
     P::cont("OP2 Decay", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 24
     P::cont("OP2 Sustain", 0.7, Display::linear(0.0, 100.0, 0, "%")), // 25
     P::cont("OP2 Release", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 26
-    P::cont("OP2 AM", 0, Display::linear(0.0, 100.0, 0, "%")), // 27
+    P::cont("OP2 AM", 0.0, Display::linear(0.0, 100.0, 0, "%")), // 27
     P::menu("OP3 Ratio", 1.0 / 11.0, &["0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12"]), // 28
     P::cont("OP3 Detune", 0.5, Display::linear(-100.0, 100.0, 0, " c")), // 29
     P::cont("OP3 Level", 0.55, Display::linear(0.0, 100.0, 0, "%")), // 30
@@ -1354,7 +1354,7 @@ const GEN: &[P] = &[
     P::cont("OP3 Decay", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 32
     P::cont("OP3 Sustain", 0.7, Display::linear(0.0, 100.0, 0, "%")), // 33
     P::cont("OP3 Release", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 34
-    P::cont("OP3 AM", 0, Display::linear(0.0, 100.0, 0, "%")), // 35
+    P::cont("OP3 AM", 0.0, Display::linear(0.0, 100.0, 0, "%")), // 35
     P::menu("OP4 Ratio", 1.0 / 11.0, &["0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12"]), // 36
     P::cont("OP4 Detune", 0.5, Display::linear(-100.0, 100.0, 0, " c")), // 37
     P::cont("OP4 Level", 0.82, Display::linear(0.0, 100.0, 0, "%")), // 38
@@ -1362,11 +1362,11 @@ const GEN: &[P] = &[
     P::cont("OP4 Decay", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 40
     P::cont("OP4 Sustain", 0.7, Display::linear(0.0, 100.0, 0, "%")), // 41
     P::cont("OP4 Release", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 42
-    P::cont("OP4 AM", 0, Display::linear(0.0, 100.0, 0, "%")), // 43
+    P::cont("OP4 AM", 0.0, Display::linear(0.0, 100.0, 0, "%")), // 43
     P::cont("Tone A", 0.55, Display::linear(0.0, 100.0, 0, "%")), // 44
     P::cont("Tone B", 0.28, Display::linear(0.0, 100.0, 0, "%")), // 45
     P::cont("Tone C", 0.16, Display::linear(0.0, 100.0, 0, "%")), // 46
-    P::cont("Noise Level", 0, Display::linear(0.0, 100.0, 0, "%")), // 47
+    P::cont("Noise Level", 0.0, Display::linear(0.0, 100.0, 0, "%")), // 47
     P::menu("Noise Kind", 0.0, &["White", "Periodic"]), // 48
     P::cont("Noise Rate", 0.4, Display::linear(0.0, 100.0, 0, "%")), // 49
     P::cont("PSG Spread", 0.5, Display::linear(0.0, 100.0, 0, "%")), // 50
