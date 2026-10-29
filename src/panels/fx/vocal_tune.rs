@@ -1,9 +1,9 @@
 //! VocalTune ID 53: native, responsive tuning controls and live-pitch display.
-use eframe::egui::{Align2, Color32, FontId, Id, Rect, Ui};
-use honeydew_audio::analysis;
 use super::live_analysis;
 use crate::panels::build::*;
 use crate::ui::UiCtx;
+use eframe::egui::{Align2, Color32, FontId, Id, Rect, Ui};
+use honeydew_audio::analysis;
 
 /// A monitor of VocalTune's own pitch detector, not a Pitcher implementation.
 fn live_pitch(
@@ -18,15 +18,21 @@ fn live_pitch(
     let feed = live_analysis(ui, module.instance_id).and_then(|s| analysis::vocal_tune(&s));
     let caption = match feed {
         Some((hz, Some(target), ratio)) if hz > 0.0 && hz.is_finite() => {
-            const NOTES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+            const NOTES: [&str; 12] = [
+                "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+            ];
             let note = target.rem_euclid(12) as usize;
             let octave = target.div_euclid(12) - 1;
             let correction = 1200.0 * ratio.max(0.0001).log2();
-            format!("INPUT {hz:.1} Hz     TARGET {}{octave}     SHIFT {correction:+.0} cents", NOTES[note])
+            format!(
+                "INPUT {hz:.1} Hz     TARGET {}{octave}     SHIFT {correction:+.0} cents",
+                NOTES[note]
+            )
         }
         _ => "INPUT -- Hz     TARGET --     Waiting for voice".to_string(),
     };
-    ui.painter().rect_filled(rect, 4.0, cx.theme.colors.control_fill.to_color32());
+    ui.painter()
+        .rect_filled(rect, 4.0, cx.theme.colors.control_fill.to_color32());
     ui.painter().text(
         rect.center(),
         Align2::CENTER_CENTER,
@@ -68,7 +74,13 @@ pub fn panel() -> Option<Panel> {
 }
 
 #[cfg(test)]
-const TABS: Row = row(1, Widget::Tabs, "TUNE · EXPRESSION · OUTPUT", [0.0, 0.0, 14.0, 1.25]).h(Size::U(1.25));
+const TABS: Row = row(
+    1,
+    Widget::Tabs,
+    "TUNE · EXPRESSION · OUTPUT",
+    [0.0, 0.0, 14.0, 1.25],
+)
+.h(Size::U(1.25));
 
 #[cfg(test)]
 pub const REFERENCE: Reference = Reference {
