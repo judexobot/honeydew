@@ -153,6 +153,7 @@ const SECTIONS: [(Option<&str>, &[Entry]); 7] = [
             lemon(crate::plugins::builtin::LEMON_SAMPLER, true),
             Entry::Synth(S::GmSynth),
             Entry::Synth(S::GameBoyApu),
+            Entry::Synth(S::Gen),
             Entry::Synth(S::MiniSynth),
             Entry::Synth(S::Slicer),
             Entry::Synth(S::SoundFontPlayer),

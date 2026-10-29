@@ -14,6 +14,7 @@ const SPEC: &[(&str, &[&str])] = &[
             "Lemon Sampler",
             "GMSynth",
             "Game Boy APU",
+            "Gen",
             "MiniSynth",
             "Slicer",
             "SoundFont Player",
@@ -160,11 +161,12 @@ fn every_current_effect_is_listed_once_and_legacy_ids_never() {
 }
 
 /// The SYNTH rows' module ids by display name.
-const SYNTH_IDS: [(&str, u16); 9] = [
+const SYNTH_IDS: [(&str, u16); 10] = [
     ("3x Osc", 39),
     ("DW Sampler", 1),
     ("GMSynth", 2),
     ("Game Boy APU", 54),
+    ("Gen", 55),
     ("MiniSynth", 0),
     ("Slicer", 33),
     ("SoundFont Player", 52),
@@ -827,6 +829,7 @@ fn top_level_lists_the_actions_then_the_instruments_then_the_effects_each_by_typ
             "3x Osc",
             "SoundFont Player",
             "Game Boy APU",
+            "Gen",
             // The built-in plugins, which have no type id of their own: by name.
             "Lemon Sampler",
             "Lemon Trio",

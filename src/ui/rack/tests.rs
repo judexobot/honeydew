@@ -94,6 +94,7 @@ fn instruments_take_the_card_heights_of_their_table() {
         (39, "3x Osc", 10.0),
         (52, "SoundFont Player", 8.5),
         (54, "Game Boy APU", 13.0),
+        (55, "Gen", 11.0),
     ];
     for (id, name, height) in table {
         assert_eq!(ui_height(id), Some(height), "{name}");

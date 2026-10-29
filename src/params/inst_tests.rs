@@ -7,7 +7,7 @@ use super::*;
 use crate::song::ChannelParams;
 
 /// Per instrument: id, display name, unique name, `PRMS` value count and pages.
-const OVERVIEW: [(u16, &str, &str, usize, &[&str]); 9] = [
+const OVERVIEW: [(u16, &str, &str, usize, &[&str]); 10] = [
     (
         0,
         "MiniSynth",
@@ -59,6 +59,7 @@ const OVERVIEW: [(u16, &str, &str, usize, &[&str]); 9] = [
         87,
         &["PULSE 1", "PULSE 2", "WAVE", "NOISE", "MIX"],
     ),
+    (55, "Gen", "Gen", 56, &["FM", "OP1", "OP2", "OP3", "OP4", "LFO", "PSG", "OUTPUT"]),
 ];
 
 fn spec(id: u16) -> &'static ModuleSpec {
@@ -99,16 +100,16 @@ fn overview_matches_the_registry() {
 
 #[test]
 fn module_spec_covers_every_effect_and_instrument_id() {
-    // Ids 0-54 less the six unregistered ones.
+    // Ids 0-55 less the six unregistered ones.
     let gaps = [17, 21, 22, 31, 37, 38];
-    for id in 0..=54u16 {
+    for id in 0..=55u16 {
         let want = (!gaps.contains(&id)).then_some(id);
         assert_eq!(module_spec(id).map(|m| m.id), want, "lookup of {id}");
     }
-    assert!(module_spec(55).is_none());
+    assert!(module_spec(56).is_none());
     // modules() keeps its meaning (the effects); the two lists split the registry.
     assert!(modules().all(|m| m.role != Role::Instrument));
-    assert_eq!(modules().count() + instruments().count(), 55 - gaps.len());
+    assert_eq!(modules().count() + instruments().count(), 56 - gaps.len());
 }
 
 #[test]
@@ -246,7 +247,7 @@ fn rows_names_defaults_and_kinds() {
     // Every instrument param but the SoundFont Player's has a row.
     let tabled: usize = OVERVIEW
         .iter()
-        .filter(|o| o.0 != 52 && o.0 != 54)
+        .filter(|o| o.0 != 52 && o.0 != 54 && o.0 != 55)
         .map(|o| o.3)
         .sum();
     assert_eq!(ROWS.len(), tabled);

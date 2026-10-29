@@ -3,6 +3,7 @@
 
 mod dw_sampler;
 mod gameboy_apu;
+mod gen;
 mod gm_synth;
 mod mini_synth;
 pub(crate) mod slicer;
@@ -21,4 +22,5 @@ modules! {
     39 => three_osc,
     52 => soundfont_player,
     54 => gameboy_apu,
+    55 => gen,
 }

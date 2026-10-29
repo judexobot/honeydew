@@ -1316,6 +1316,67 @@ const GAMEBOY_APU: &[P] = &[
     ),
 ];
 
+
+// Gen: dedicated FM/PSG synthesizer, module type 55. IDs and defaults mirror honeydew_audio::gen.
+const GEN: &[P] = &[
+    P::ENABLE, // 0
+    P::menu("Algorithm", 0.0, &["1 Serial", "2 Branch", "3 Split", "4 Chain", "5 Dual", "6 Fan", "7 Mix", "8 Parallel"]), // 1
+    P::cont("Feedback", 0.30, Display::linear(0.0, 100.0, 0, "%")), // 2
+    P::cont("Master", 0.65, Display::linear(0.0, 100.0, 0, "%")), // 3
+    P::cont("FM Level", 0.88, Display::linear(0.0, 100.0, 0, "%")), // 4
+    P::cont("PSG Level", 0.24, Display::linear(0.0, 100.0, 0, "%")), // 5
+    P::cont("LFO Rate", 0.25, Display::linear(0.1, 20.0, 1, " Hz")), // 6
+    P::cont("Pitch LFO", 0.0, Display::linear(0.0, 100.0, 0, "%")), // 7
+    P::cont("Amp LFO", 0.0, Display::linear(0.0, 100.0, 0, "%")), // 8
+    P::cont("Drive", 0.0, Display::linear(0.0, 100.0, 0, "%")), // 9
+    P::cont("DAC Color", 0.0, Display::linear(0.0, 100.0, 0, "%")), // 10
+    P::cont("Stereo Width", 0.5, Display::linear(0.0, 100.0, 0, "%")), // 11
+    P::menu("OP1 Ratio", 1.0 / 11.0, &["0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12"]), // 12
+    P::cont("OP1 Detune", 0.5, Display::linear(-100.0, 100.0, 0, " c")), // 13
+    P::cont("OP1 Level", 0.55, Display::linear(0.0, 100.0, 0, "%")), // 14
+    P::cont("OP1 Attack", 0.06, Display::linear(0.0, 100.0, 0, "%")), // 15
+    P::cont("OP1 Decay", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 16
+    P::cont("OP1 Sustain", 0.7, Display::linear(0.0, 100.0, 0, "%")), // 17
+    P::cont("OP1 Release", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 18
+    P::cont("OP1 AM", 0, Display::linear(0.0, 100.0, 0, "%")), // 19
+    P::menu("OP2 Ratio", 1.0 / 11.0, &["0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12"]), // 20
+    P::cont("OP2 Detune", 0.5, Display::linear(-100.0, 100.0, 0, " c")), // 21
+    P::cont("OP2 Level", 0.55, Display::linear(0.0, 100.0, 0, "%")), // 22
+    P::cont("OP2 Attack", 0.06, Display::linear(0.0, 100.0, 0, "%")), // 23
+    P::cont("OP2 Decay", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 24
+    P::cont("OP2 Sustain", 0.7, Display::linear(0.0, 100.0, 0, "%")), // 25
+    P::cont("OP2 Release", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 26
+    P::cont("OP2 AM", 0, Display::linear(0.0, 100.0, 0, "%")), // 27
+    P::menu("OP3 Ratio", 1.0 / 11.0, &["0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12"]), // 28
+    P::cont("OP3 Detune", 0.5, Display::linear(-100.0, 100.0, 0, " c")), // 29
+    P::cont("OP3 Level", 0.55, Display::linear(0.0, 100.0, 0, "%")), // 30
+    P::cont("OP3 Attack", 0.06, Display::linear(0.0, 100.0, 0, "%")), // 31
+    P::cont("OP3 Decay", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 32
+    P::cont("OP3 Sustain", 0.7, Display::linear(0.0, 100.0, 0, "%")), // 33
+    P::cont("OP3 Release", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 34
+    P::cont("OP3 AM", 0, Display::linear(0.0, 100.0, 0, "%")), // 35
+    P::menu("OP4 Ratio", 1.0 / 11.0, &["0.5", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "12"]), // 36
+    P::cont("OP4 Detune", 0.5, Display::linear(-100.0, 100.0, 0, " c")), // 37
+    P::cont("OP4 Level", 0.82, Display::linear(0.0, 100.0, 0, "%")), // 38
+    P::cont("OP4 Attack", 0.06, Display::linear(0.0, 100.0, 0, "%")), // 39
+    P::cont("OP4 Decay", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 40
+    P::cont("OP4 Sustain", 0.7, Display::linear(0.0, 100.0, 0, "%")), // 41
+    P::cont("OP4 Release", 0.32, Display::linear(0.0, 100.0, 0, "%")), // 42
+    P::cont("OP4 AM", 0, Display::linear(0.0, 100.0, 0, "%")), // 43
+    P::cont("Tone A", 0.55, Display::linear(0.0, 100.0, 0, "%")), // 44
+    P::cont("Tone B", 0.28, Display::linear(0.0, 100.0, 0, "%")), // 45
+    P::cont("Tone C", 0.16, Display::linear(0.0, 100.0, 0, "%")), // 46
+    P::cont("Noise Level", 0, Display::linear(0.0, 100.0, 0, "%")), // 47
+    P::menu("Noise Kind", 0.0, &["White", "Periodic"]), // 48
+    P::cont("Noise Rate", 0.4, Display::linear(0.0, 100.0, 0, "%")), // 49
+    P::cont("PSG Spread", 0.5, Display::linear(0.0, 100.0, 0, "%")), // 50
+    P::cont("Bend Range", 0.25, Display::linear(1.0, 13.0, 0, " st")), // 51
+    P::cont("Portamento", 0.0, Display::linear(0.0, 400.0, 0, " ms")), // 52
+    P::cont("Release Tail", 0.0, Display::linear(0.0, 100.0, 0, "%")), // 53
+    P::menu("Engine", 0.0, &["FM + PSG", "FM", "PSG"]), // 54
+    P::cont("Trim", 0.5, Display::linear(-12.0, 12.0, 0, " dB")), // 55
+];
+
 pub static MODULES: &[ModuleSpec] = &[
     ModuleSpec::instrument(
         0,
@@ -1374,4 +1435,5 @@ pub static MODULES: &[ModuleSpec] = &[
         GAMEBOY_APU,
         &["PULSE 1", "PULSE 2", "WAVE", "NOISE", "MIX"],
     ),
+    ModuleSpec::instrument(55, "Gen", "Gen", GEN, &["FM", "OP1", "OP2", "OP3", "OP4", "LFO", "PSG", "OUTPUT"]),
 ];

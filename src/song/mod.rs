@@ -51,10 +51,11 @@ pub enum SynthKind {
     ThreeXOsc,
     SoundFontPlayer,
     GameBoyApu,
+    Gen,
 }
 
 impl SynthKind {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::MiniSynth,
         Self::DwSampler,
         Self::GmSynth,
@@ -64,6 +65,7 @@ impl SynthKind {
         Self::ThreeXOsc,
         Self::SoundFontPlayer,
         Self::GameBoyApu,
+        Self::Gen,
     ];
 
     pub fn label(self) -> &'static str {
@@ -77,6 +79,7 @@ impl SynthKind {
             Self::ThreeXOsc => "3x Osc",
             Self::SoundFontPlayer => "SoundFont Player",
             Self::GameBoyApu => "Game Boy APU",
+            Self::Gen => "Gen",
         }
     }
 
@@ -92,6 +95,7 @@ impl SynthKind {
             Self::ThreeXOsc => 39,
             Self::SoundFontPlayer => 52,
             Self::GameBoyApu => 54,
+            Self::Gen => 55,
         }
     }
 }
