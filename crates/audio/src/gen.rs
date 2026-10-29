@@ -25,7 +25,7 @@ const fn defaults() -> [f32; NUM_PARAMS] {
     let mut op = 0;
     while op < 4 {
         let i = OP_START + op * OP_STRIDE;
-        p[i] = 0.2;      // frequency ratio selector, 1x default
+        p[i] = 1.0 / 11.0; // frequency ratio selector, 1x default
         p[i + 1] = 0.5;  // +/- 100 cents detune
         p[i + 2] = if op == 3 { 0.82 } else { 0.55 };
         p[i + 3] = 0.06; // attack
