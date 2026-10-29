@@ -14,7 +14,7 @@ use honeydew_audio::instrument::KEY_LEARN;
 // ---- the height table ----
 
 /// One heading per module: its name, type id and card height (UIHeight).
-const HEADINGS: [&str; 39] = [
+const HEADINGS: [&str; 40] = [
     r#"### 2.1 Equalizer (ID 3, effect) — UIHeight 10 U"#,
     r#"### 2.2 MultiFX (ID 4, effect) — UIHeight 9 U"#,
     r#"### 2.3 Limiter (legacy) (ID 5, effect) — UIHeight 6 U"#,
@@ -54,6 +54,7 @@ const HEADINGS: [&str; 39] = [
     r#"### 2.37 Randomizer (ID 49, note effect) — UIHeight 6 U"#,
     r#"### 2.38 Scale (ID 50, note effect) — UIHeight 6.5 U"#,
     r#"### 2.39 Arpeggiator (ID 51, note effect) — UIHeight 10 U"#,
+    r#"### 2.40 VocalTune (ID 53, effect) — UIHeight 9 U"#,
 ];
 
 /// The text between `from` and the next `to`.
