@@ -1,0 +1,26 @@
+name: VocalTune DSP smoke test
+on:
+  push:
+    branches: [feature/vocaltune-v03]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  dsp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          filter: blob:none
+          sparse-checkout: |
+            crates/audio/src/vocal_tune.rs
+          sparse-checkout-cone-mode: false
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt
+      - name: Format and compile independent DSP
+        run: |
+          rustfmt --edition 2024 crates/audio/src/vocal_tune.rs
+          rustc --edition 2024 --test crates/audio/src/vocal_tune.rs -o /tmp/vocaltune-tests
+      - name: Run DSP unit tests
+        run: /tmp/vocaltune-tests --nocapture
