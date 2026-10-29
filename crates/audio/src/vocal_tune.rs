@@ -17,6 +17,7 @@ pub enum Scale {
     Minor,
     Pentatonic,
     Blues,
+    Custom,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -32,7 +33,10 @@ pub struct Parameters {
     pub reference_hz: f32,
     pub hard_tune: bool,
     pub detune_cents: f32,
-}
+    /// Bit 0 is C and bit 11 is B, for Custom mode.
+    pub custom_notes: u16,
+    pub protect_sibilants: f32,
+
 impl Default for Parameters {
     fn default() -> Self {
         Self {
@@ -47,6 +51,8 @@ impl Default for Parameters {
             reference_hz: 440.0,
             hard_tune: false,
             detune_cents: 0.0,
+            custom_notes: 0x0fff,
+            protect_sibilants: 0.75,
         }
     }
 }
@@ -70,6 +76,8 @@ pub struct VocalTune {
     pitch_hz: Option<f32>,
     note: Option<i32>,
     sustain_samples: u64,
+    clarity: f32,
+    sibilance: f32,
 }
 impl VocalTune {
     pub fn new(rate: u32) -> Result<Self, &'static str> {
@@ -96,6 +104,8 @@ impl VocalTune {
             pitch_hz: None,
             note: None,
             sustain_samples: 0,
+            clarity: 0.0,
+            sibilance: 0.0,
         };
         out.set_parameters(Parameters::default());
         Ok(out)
@@ -113,6 +123,8 @@ impl VocalTune {
             reference_hz: finite_clamp(p.reference_hz, 430.0, 450.0, 440.0),
             hard_tune: p.hard_tune,
             detune_cents: finite_clamp(p.detune_cents, -50.0, 50.0, 0.0),
+            custom_notes: p.custom_notes & 0x0fff,
+            protect_sibilants: finite_clamp(p.protect_sibilants, 0.0, 1.0, 0.75),
         };
         self.retune_alpha = 1.0 - (-1000.0 / (self.params.retune_ms * self.rate)).exp();
     }
@@ -127,6 +139,9 @@ impl VocalTune {
     }
     pub fn ratio(&self) -> f32 {
         self.ratio
+    }
+    pub fn clarity(&self) -> f32 {
+        self.clarity
     }
     pub const fn latency_samples(&self) -> usize {
         DRY_DELAY
@@ -146,6 +161,8 @@ impl VocalTune {
         self.pitch_hz = None;
         self.note = None;
         self.sustain_samples = 0;
+        self.clarity = 0.0;
+        self.sibilance = 0.0;
     }
     pub fn process(&mut self, left: &mut [f32], right: &mut [f32]) -> Result<(), &'static str> {
         if left.len() != right.len() {
@@ -190,7 +207,10 @@ impl VocalTune {
         let wet_r = w * tap(&self.right, self.at, d1) + (1.0 - w) * tap(&self.right, self.at, d2);
         // At exact unison bypass the delay-tap comb coloration. Fade near unison.
         let shift_weight = ((self.ratio - 1.0).abs() * 100.0).min(1.0);
-        let mix = self.params.wet * self.voiced * shift_weight;
+        // Guard noisy consonants and ambiguous periodicity against metallic artifacts.
+        let consonant_gate = 1.0 - self.params.protect_sibilants * self.sibilance;
+        let confidence_gate = (self.clarity * 2.0).min(1.0);
+        let mix = self.params.wet * self.voiced * shift_weight * consonant_gate * confidence_gate;
         self.written += 1;
         self.at = (self.at + 1) % HISTORY;
         (dry_l + (wet_l - dry_l) * mix, dry_r + (wet_r - dry_r) * mix)
@@ -202,10 +222,21 @@ impl VocalTune {
             .ceil()
             .min(MAX_LAG as f32) as usize;
         let mut energy = 0.0;
+        let mut absolute = 0.0;
+        let mut roughness = 0.0;
+        let mut previous = 0.0f32;
         for j in 0..YIN_POINTS {
             let x = self.mono[lag_index(self.at, j * stride)];
             energy += x * x;
+            absolute += x.abs();
+            if j != 0 {
+                roughness += (x - previous).abs();
+            }
+            previous = x;
         }
+        // A turbulence estimate: higher for consonant-like noise than periodic vowels.
+        let relative_roughness = roughness / (2.0 * absolute + 1e-6);
+        self.sibilance = ((relative_roughness - 0.22) / 0.40).clamp(0.0, 1.0);
         let floor = 0.00005 - 0.000048 * self.params.sensitivity;
         if energy < floor * YIN_POINTS as f32 {
             self.unvoiced();
@@ -261,12 +292,13 @@ impl VocalTune {
             return;
         }
         self.pitch_hz = Some(hz);
+        self.clarity = (1.0 - self.scores[lag]).clamp(0.0, 1.0);
         let midi = 69.0 + 12.0 * (hz / self.params.reference_hz).log2();
-        let next = nearest_note(midi, self.params.root, self.params.scale);
+        let next = nearest_note_with_mask(midi, self.params.root, self.params.scale, self.params.custom_notes);
         let next = match (next, self.note) {
             (Some(n), Some(prev))
                 if n != prev
-                    && allowed(prev, self.params.root, self.params.scale)
+                    && allowed(prev, self.params.root, self.params.scale, self.params.custom_notes)
                     && (midi - prev as f32).abs() < (midi - n as f32).abs() + 0.10 =>
             {
                 Some(prev)
@@ -295,6 +327,7 @@ impl VocalTune {
     fn unvoiced(&mut self) {
         self.pitch_hz = None;
         self.note = None;
+        self.clarity = 0.0;
         self.target_ratio = 1.0;
         self.sustain_samples = 0;
     }
@@ -317,23 +350,27 @@ fn tap(ring: &[f32; HISTORY], write: usize, delay: f32) -> f32 {
     let b = ring[lag_index(write, whole + 1)];
     a + (b - a) * frac
 }
-fn allowed(m: i32, root: u8, scale: Scale) -> bool {
+fn allowed(m: i32, root: u8, scale: Scale, custom_notes: u16) -> bool {
     match scale {
         Scale::Chromatic => true,
         Scale::Major => matches!((m - root as i32).rem_euclid(12), 0 | 2 | 4 | 5 | 7 | 9 | 11),
         Scale::Minor => matches!((m - root as i32).rem_euclid(12), 0 | 2 | 3 | 5 | 7 | 8 | 10),
         Scale::Pentatonic => matches!((m - root as i32).rem_euclid(12), 0 | 2 | 4 | 7 | 9),
         Scale::Blues => matches!((m - root as i32).rem_euclid(12), 0 | 3 | 5 | 6 | 7 | 10),
+        Scale::Custom => custom_notes & (1u16 << m.rem_euclid(12)) != 0,
     }
 }
 pub fn nearest_note(midi: f32, root: u8, scale: Scale) -> Option<i32> {
+    nearest_note_with_mask(midi, root, scale, 0x0fff)
+}
+pub fn nearest_note_with_mask(midi: f32, root: u8, scale: Scale, custom_notes: u16) -> Option<i32> {
     if !midi.is_finite() {
         return None;
     }
     let around = midi.round() as i32;
     (-2..=2)
         .map(|i| around + i)
-        .filter(|&n| allowed(n, root % 12, scale))
+        .filter(|&n| allowed(n, root % 12, scale, custom_notes))
         .min_by(|a, b| {
             (midi - *a as f32)
                 .abs()
@@ -348,6 +385,13 @@ mod tests {
         assert_eq!(nearest_note(60.6, 0, Scale::Major), Some(60));
         assert_eq!(nearest_note(61.7, 0, Scale::Major), Some(62));
         assert_eq!(nearest_note(63.1, 0, Scale::Minor), Some(63));
+    }
+    #[test]
+    fn custom_note_map_only_uses_enabled_notes() {
+        let mask = (1 << 0) | (1 << 7); // C and G in any octave
+        assert_eq!(nearest_note_with_mask(61.0, 0, Scale::Custom, mask), Some(60));
+        assert_eq!(nearest_note_with_mask(66.6, 0, Scale::Custom, mask), Some(67));
+        assert_eq!(nearest_note_with_mask(60.0, 0, Scale::Custom, 0), None);
     }
     #[test]
     fn detects_440_hz() {
