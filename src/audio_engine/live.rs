@@ -63,18 +63,26 @@ pub(super) fn build(
         )
         .map_err(EngineError::Notes)
     };
-    let midi = if song.channels[channel]
+    let sources = if song.channels[channel]
+        .rack
+        .modules
+        .iter()
+        .any(|m| m.type_id == 55)
+    {
+        16
+    } else if song.channels[channel]
         .rack
         .modules
         .iter()
         .any(|m| m.type_id == 54)
     {
-        (0..4)
-            .map(|_| make_chain(effects.clone()))
-            .collect::<Result<Vec<_>, _>>()?
+        4
     } else {
-        Vec::new()
+        0
     };
+    let midi = (0..sources)
+        .map(|_| make_chain(effects.clone()))
+        .collect::<Result<Vec<_>, _>>()?;
     let chain = make_chain(effects)?;
     let lanes = &song.channels[channel].lanes;
     Ok(Some(Live {

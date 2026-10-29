@@ -107,7 +107,34 @@ pub fn track_menu(song: &Song, channel: usize, lane: usize) -> Vec<PopupItem<Tra
     let mut items: Vec<_> = column(0, channel_items.into_iter().flatten().collect())
         .chain(column(1, kind_items.to_vec()))
         .collect();
-    if this.kind == LaneKind::Notes && ch.rack.modules.iter().any(|m| m.type_id == 54) {
+    if this.kind == LaneKind::Notes && ch.rack.modules.iter().any(|m| m.type_id == 55) {
+        const LABELS: [&str; 17] = [
+            "Gen: Keyboard",
+            "Gen: MIDI 1",
+            "Gen: MIDI 2",
+            "Gen: MIDI 3",
+            "Gen: MIDI 4",
+            "Gen: MIDI 5",
+            "Gen: MIDI 6",
+            "Gen: MIDI 7",
+            "Gen: MIDI 8",
+            "Gen: MIDI 9",
+            "Gen: MIDI 10",
+            "Gen: MIDI 11",
+            "Gen: MIDI 12",
+            "Gen: MIDI 13",
+            "Gen: MIDI 14",
+            "Gen: MIDI 15",
+            "Gen: MIDI 16",
+        ];
+        for (i, label) in LABELS.into_iter().enumerate() {
+            let target = (i > 0).then(|| (i - 1) as u8);
+            items.push(PopupItem {
+                disabled: this.midi_channel() == target,
+                ..PopupItem::new(GameBoyChannel(target), 2 + i / 9, i % 9, label)
+            });
+        }
+    } else if this.kind == LaneKind::Notes && ch.rack.modules.iter().any(|m| m.type_id == 54) {
         for (row, (target, label)) in [
             (None, "APU: Keyboard"),
             (Some(0), "APU: PULSE 1"),

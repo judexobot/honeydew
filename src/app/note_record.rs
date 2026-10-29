@@ -319,7 +319,7 @@ impl HoneydewApp {
             self.rekey(&added);
             changed = true;
         }
-        for source in 0..4 {
+        for source in 0..self.midi_records.len() {
             if let Some(added) = self.midi_records[source].record(&mut self.song, &now) {
                 self.rekey(&added);
                 changed = true;

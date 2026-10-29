@@ -272,9 +272,10 @@ fn notes(
         if !instruments.iter().any(|(id, _)| *id == instance_id) {
             continue;
         }
-        if module.type_id == 54 {
+        if matches!(module.type_id, 54 | 55) {
             let rack = note_rack(song, effects.clone(), sample_rate)?;
-            for source in [None, Some(0), Some(1), Some(2), Some(3)] {
+            let sources = if module.type_id == 55 { 16 } else { 4 };
+            for source in std::iter::once(None).chain((0..sources).map(Some)) {
                 let group =
                     SongAudioBridge::note_events_for_midi(song, channel, 0.0, end_beat, source)
                         .map_err(EngineError::Song)?;

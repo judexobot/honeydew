@@ -188,9 +188,12 @@ impl SongAudioEngine {
                 built.instrument.set_tempo_bpm(self.tempo_bpm);
             }
             self.held[channel][row] = old.held[from][old_row];
-            for midi in 0..4 {
-                let target = self.instruments[channel].len() + 1 + row * 4 + midi;
-                let source = old.instruments[from].len() + 1 + old_row * 4 + midi;
+            let stride =
+                super::midi_stride(self.held[channel].len(), self.instruments[channel].len());
+            let old_stride = super::midi_stride(old.held[from].len(), old.instruments[from].len());
+            for midi in 0..stride.min(old_stride) {
+                let target = self.instruments[channel].len() + 1 + row * stride + midi;
+                let source = old.instruments[from].len() + 1 + old_row * old_stride + midi;
                 if let (Some(target), Some(source)) = (
                     self.held[channel].get_mut(target),
                     old.held[from].get(source),

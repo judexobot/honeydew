@@ -146,15 +146,16 @@ impl HoneydewApp {
         };
         let mut linked = false;
         for msg in messages.iter().filter_map(|m| MidiMsg::parse(m)) {
-            let mapped =
-                self.song
-                    .channels
-                    .get(self.selected_channel)
-                    .is_some_and(|c| {
-                        c.rack.modules.iter().any(|m| {
-                            m.type_id == 54 && m.params.get(23).copied().unwrap_or(0.0) > 0.75
-                        })
-                    });
+            let mapped = self
+                .song
+                .channels
+                .get(self.selected_channel)
+                .is_some_and(|c| {
+                    c.rack.modules.iter().any(|m| {
+                        m.type_id == 55
+                            || (m.type_id == 54 && m.params.get(23).copied().unwrap_or(0.0) > 0.75)
+                    })
+                });
             let mut outs = if mapped {
                 self.midi
                     .router

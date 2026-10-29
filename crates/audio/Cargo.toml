@@ -27,3 +27,6 @@ os-engine = { path = "../../vendor/lemon-studio/os-engine" }
 [[test]]
 name = "vocal_tune_spectral"
 path = "../../tools/vocaltune-spectral.rs"
+
+[build-dependencies]
+cc = "1.2"

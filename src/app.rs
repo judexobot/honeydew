@@ -186,7 +186,7 @@ pub struct HoneydewApp {
     auto_record: auto_record::AutoRecord,
     /// REC's live notes and drum hits ([`note_record`]).
     note_record: note_record::NoteRecord,
-    midi_records: [note_record::NoteRecord; 4],
+    midi_records: [note_record::NoteRecord; 16],
     /// The audio input: one device, open while something needs it ([`Self::open_input`]).
     input: InputLink,
     /// The input failed to open since what needs it last changed ([`Self::input_need`]) or an `Audio Record` channel

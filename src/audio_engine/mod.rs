@@ -423,13 +423,16 @@ impl SongAudioEngine {
             .iter()
             .enumerate()
             .map(|(channel, modules)| {
-                // Extra address rows only on APU racks; checkpoints retain MIDI identity on seeks and loops.
-                let midi = song.channels[channel]
-                    .rack
-                    .modules
-                    .iter()
-                    .any(|m| m.type_id == 54);
-                vec![[0; 128]; modules.len() + 1 + if midi { 4 * modules.len() } else { 0 }]
+                // Independent source rows keep sequenced MIDI identities on seeks, loops and edits.
+                let rack = &song.channels[channel].rack.modules;
+                let sources = if rack.iter().any(|m| m.type_id == 55) {
+                    16
+                } else if rack.iter().any(|m| m.type_id == 54) {
+                    4
+                } else {
+                    0
+                };
+                vec![[0; 128]; modules.len() + 1 + sources * modules.len()]
             })
             .collect();
         let held_pads: Vec<_> = (kits.iter())
@@ -707,8 +710,16 @@ impl SongAudioEngine {
                         .iter()
                         .position(|(id, _)| *id == instance_id)
                         .and_then(|row| {
-                            self.held[event.channel]
-                                .get(modules.len() + 1 + row * 4 + usize::from(midi))
+                            self.held[event.channel].get(
+                                modules.len()
+                                    + 1
+                                    + row
+                                        * midi_stride(
+                                            self.held[event.channel].len(),
+                                            modules.len(),
+                                        )
+                                    + usize::from(midi),
+                            )
                         })
                         .map_or(0, |keys| keys[usize::from(key)]);
                     if let Some(module) = self
@@ -1728,9 +1739,11 @@ impl SongAudioEngine {
             self.held_keys[channel] &= !uncovered;
             for row in 0..self.held[channel].len() {
                 let count = self.instruments[channel].len();
+                let stride = midi_stride(self.held[channel].len(), count);
                 let address = row
                     .checked_sub(count + 1)
-                    .map(|address| (address / 4, (address % 4) as u8));
+                    .filter(|_| stride > 0)
+                    .map(|address| (address / stride, (address % stride) as u8));
                 let instrument_row = address.map_or(row, |(row, _)| row);
                 let id = self.instruments[channel]
                     .get(instrument_row)
@@ -2056,6 +2069,10 @@ impl Checkpoints {
     }
 }
 
+fn midi_stride(rows: usize, instruments: usize) -> usize {
+    rows.saturating_sub(instruments + 1) / instruments.max(1)
+}
+
 /// What `actions` (applied in order from nothing held) cover: [`hold`] as a re-sync reads it.
 fn cover(
     actions: &[ScheduledAction],
@@ -2087,6 +2104,7 @@ fn hold(
     played: bool,
 ) {
     let channel = event.channel;
+    let source_stride = midi_stride(keys[channel].len(), instruments[channel].len());
     let row = |id: i32| match id {
         KIT => Some(instruments[channel].len()),
         id => (instruments[channel].iter()).position(|(other, _)| *other == id),
@@ -2120,8 +2138,12 @@ fn hold(
         ) => (
             row(instance_id)
                 .and_then(|r| {
-                    keys[channel]
-                        .get_mut(instruments[channel].len() + 1 + r * 4 + usize::from(midi))
+                    keys[channel].get_mut(
+                        instruments[channel].len()
+                            + 1
+                            + r * source_stride
+                            + usize::from(midi),
+                    )
                 })
                 .and_then(|r| r.get_mut(usize::from(key))),
             if velocity.is_some() { up } else { down },
