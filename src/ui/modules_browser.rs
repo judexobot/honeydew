@@ -201,6 +201,7 @@ const SECTIONS: [(Option<&str>, &[Entry]); 7] = [
             M(14),
             M(25),
             M(45),
+            M(52),
             M(42),
             M(46),
             M(24),

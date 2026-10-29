@@ -27,6 +27,7 @@ pub mod note_effects;
 pub mod ogg_writer;
 pub mod pitcher;
 pub mod pitcher2;
+pub mod vocal_tune;
 pub mod playback;
 mod reverbs;
 pub mod sample;
@@ -97,6 +98,7 @@ pub fn effect_info(id: u16) -> Option<EffectInfo> {
         44 => ("Spreader", 5),
         45 => ("Pitcher 2", 27),
         46 => ("Tremolo", 12),
+        52 => ("VocalTune", 6),
         lemon::REVERB => ("Lemon Reverb", lemon::REVERB_MID_SIDE + 1),
         lemon::LIMITER => ("Lemon Limiter", lemon::LIMITER_SAFETY + 1),
         _ => return None,
@@ -458,6 +460,23 @@ impl AudioEffect {
                 ],
                 Processor::Tremolo(TremoloState::default()),
             ),
+            52 => {
+                let params = vec![1.0, 0.0, 0.0, 1.0, 0.25, 1.0];
+                let rate = sample_rate as u32;
+                if (rate as f32 - sample_rate).abs() > 0.001 {
+                    return Err(EffectError::InvalidSampleRate);
+                }
+                let mut state = vocal_tune::VocalTune::new(rate)
+                    .map_err(|_| EffectError::InvalidSampleRate)?;
+                state.set_parameters(vocal_tune::Parameters {
+                    root: 0,
+                    scale: vocal_tune::Scale::Chromatic,
+                    correction: 1.0,
+                    retune_ms: 2.0 + 298.0 * 0.25_f32.powi(2),
+                    wet: 1.0,
+                });
+                (params, Processor::VocalTune(Box::new(state)))
+            }
             lemon::REVERB => {
                 let params = lemon::defaults(id);
                 let state = lemon::ReverbFx::new(sample_rate, &params);
@@ -532,6 +551,7 @@ impl AudioEffect {
             Processor::Gate(_) => 255,
             Processor::Pitcher(state) => state.latency_samples(),
             Processor::Pitcher2(state) => state.latency_samples(),
+            Processor::VocalTune(state) => state.latency_samples(),
             Processor::LemonLimiter(state) => state.latency(),
             _ => 0,
         }
@@ -541,11 +561,20 @@ impl AudioEffect {
         if !sample_rate.is_finite() || sample_rate <= 0.0 {
             return Err(EffectError::InvalidSampleRate);
         }
+        if self.id == 52
+            && (sample_rate.fract() != 0.0 || !(22_050.0..=96_000.0).contains(&sample_rate))
+        {
+            return Err(EffectError::InvalidSampleRate);
+        }
         if matches!(self.id, 25 | 45) && sample_rate < 2000.0 {
             return Err(EffectError::InvalidSampleRate);
         }
         if sample_rate != self.sample_rate {
             self.sample_rate = sample_rate;
+            if let Processor::VocalTune(state) = &mut self.processor {
+                *state = Box::new(vocal_tune::VocalTune::new(sample_rate as u32)
+                    .map_err(|_| EffectError::InvalidSampleRate)?);
+            }
             // ponytail: the Analyzer's settings go back to a new module's here; no host changes the rate of a built
             // effect yet (the engine rebuilds and re-applies them), carry them over if one does.
             self.probe = analysis::Probe::new(self.id, sample_rate);
@@ -829,6 +858,7 @@ enum Processor {
     Multiband(Box<MultibandState>),
     Pitcher(Box<PitcherState>),
     Pitcher2(Box<Pitcher2State>),
+    VocalTune(Box<vocal_tune::VocalTune>),
     Comb(Box<CombState>),
     TapeStop(TapeStopState),
     Spreader(SpreaderState),
@@ -867,6 +897,19 @@ impl Processor {
             }
             Self::Pitcher2(state) => {
                 state.refresh(params, sample_rate).unwrap();
+            }
+            Self::VocalTune(state) => {
+                let root = (params[1] * 11.0).round() as u8;
+                let scale = match (params[2] * 2.0).round() as u8 {
+                    1 => vocal_tune::Scale::Major,
+                    2 => vocal_tune::Scale::Minor,
+                    _ => vocal_tune::Scale::Chromatic,
+                };
+                state.set_parameters(vocal_tune::Parameters {
+                    root, scale, correction: params[3],
+                    retune_ms: 2.0 + 298.0 * params[4].powi(2),
+                    wet: params[5],
+                });
             }
             Self::Comb(state) => state.refresh(params, sample_rate),
             Self::TapeStop(state) => state.refresh(params, sample_rate),
@@ -942,6 +985,7 @@ impl Processor {
             Self::Multiband(state) => state.process_frame(l, r),
             Self::Pitcher(state) => state.process_frame(l, r),
             Self::Pitcher2(state) => state.process_frame(l, r),
+            Self::VocalTune(state) => state.process_frame(l, r),
             Self::Comb(state) => state.process_frame(l, r),
             Self::TapeStop(state) => state.process_frame(l, r),
             Self::Spreader(state) => state.process_frame(l, r),
@@ -980,6 +1024,7 @@ impl Processor {
             Self::Multiband(state) => state.reset(),
             Self::Pitcher(state) => state.reset(),
             Self::Pitcher2(state) => state.reset(),
+            Self::VocalTune(state) => state.reset(),
             Self::Comb(state) => state.reset(),
             Self::TapeStop(state) => state.reset(),
             Self::Spreader(state) => state.reset(),

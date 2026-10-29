@@ -49,6 +49,7 @@ mod tuned_eq;
 mod tuner;
 mod waveshaper;
 mod wow_flutter;
+mod vocal_tune;
 // Not in `modules!`: Honeydew's own effects, outside the registry's `modules()`.
 pub(super) mod lemon;
 
@@ -92,6 +93,7 @@ modules! {
     49 => randomizer,
     50 => scale,
     51 => arpeggiator,
+    52 => vocal_tune,
 }
 
 /// Where the rack posts a module's latest meter (a [`MeterSnapshot`]) for its panel's draws, in egui temp data: under
