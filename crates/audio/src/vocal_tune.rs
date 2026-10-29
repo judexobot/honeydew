@@ -36,6 +36,7 @@ pub struct Parameters {
     /// Bit 0 is C and bit 11 is B, for Custom mode.
     pub custom_notes: u16,
     pub protect_sibilants: f32,
+}
 
 impl Default for Parameters {
     fn default() -> Self {
