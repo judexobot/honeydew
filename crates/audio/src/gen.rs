@@ -162,7 +162,7 @@ impl Voice {
         }
         self.feedback = output[0] * 0.7 + self.feedback * 0.3;
         let out = match algorithm {
-            0 | 1 | 2 | 3 => output[3],
+            0..=3 => output[3],
             4 => (output[1] + output[3]) * 0.65,
             5 => (output[1] + output[2] + output[3]) * 0.48,
             6 => (output[1] + output[2] + output[3]) * 0.48,
@@ -264,8 +264,8 @@ impl Gen {
 }
 impl Instrument for Gen {
     fn set_parameter(&mut self, i: usize, value: f32) {
-        if let Some(p) = self.params.get_mut(i) {
-            if value.is_finite() { *p = value.clamp(0.0,1.0); }
+        if let Some(p) = self.params.get_mut(i) && value.is_finite() {
+            *p = value.clamp(0.0, 1.0);
         }
     }
     fn note_on(&mut self, key: u8, velocity: f32, pan: f32) { self.start(0,key,velocity,pan); }
