@@ -317,8 +317,8 @@ mod tests {
         });
         let mut l = vec![0.0; 16000];
         let mut r = l.clone();
-        for i in 0..l.len() {
-            l[i] = (i as f32 * 0.04).sin();
+        for (i, sample) in l.iter_mut().enumerate() {
+            *sample = (i as f32 * 0.04).sin();
         }
         a.process(&mut l, &mut r).unwrap();
         for i in 1536..l.len() {
