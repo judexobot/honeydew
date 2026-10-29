@@ -14,6 +14,7 @@ jobs:
           filter: blob:none
           sparse-checkout: |
             crates/audio/src/vocal_tune.rs
+            tools/vocaltune-spectral.rs
           sparse-checkout-cone-mode: false
       - uses: dtolnay/rust-toolchain@1.91.0
         with:
@@ -24,3 +25,7 @@ jobs:
           rustc --edition 2024 --test crates/audio/src/vocal_tune.rs -o /tmp/vocaltune-tests
       - name: Run DSP unit tests
         run: /tmp/vocaltune-tests --nocapture
+      - name: Validate output spectrum 450 Hz to A4
+        run: |
+          rustc --edition 2024 --test tools/vocaltune-spectral.rs -o /tmp/vocaltune-spectral
+          /tmp/vocaltune-spectral --nocapture

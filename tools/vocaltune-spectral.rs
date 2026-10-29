@@ -1,0 +1,37 @@
+#[path = "../crates/audio/src/vocal_tune.rs"]
+mod vocal_tune;
+use std::f64::consts::PI;
+use vocal_tune::{Parameters, Scale, VocalTune};
+
+fn magnitude(samples: &[f32], hz: f64, rate: f64) -> f64 {
+    let coefficient = 2.0 * (2.0 * PI * hz / rate).cos();
+    let (mut q1, mut q2) = (0.0_f64, 0.0_f64);
+    for (i, &v) in samples.iter().enumerate() {
+        let w = 0.5 - 0.5 * (2.0 * PI * i as f64 / samples.len() as f64).cos();
+        let q0 = v as f64 * w + coefficient * q1 - q2;
+        q2 = q1;
+        q1 = q0;
+    }
+    q1 * q1 + q2 * q2 - coefficient * q1 * q2
+}
+#[test]
+fn actual_output_is_tuned_closer_to_440() {
+    let rate = 48_000.0_f64;
+    let mut fx = VocalTune::new(rate as u32).unwrap();
+    fx.set_parameters(Parameters { root: 0, scale: Scale::Chromatic,
+        correction: 1.0, retune_ms: 2.0, wet: 1.0 });
+    let mut output = Vec::new();
+    for i in 0..120_000 {
+        let x = (2.0 * PI * 450.0 * i as f64 / rate).sin() as f32 * 0.5;
+        let (y, _) = fx.process_frame(x, x);
+        if i >= 72_000 { output.push(y); }
+    }
+    let mut strongest = (0, -1.0_f64);
+    for hz in 425..=460 {
+        let magnitude = magnitude(&output, hz as f64, rate);
+        if magnitude > strongest.1 { strongest = (hz, magnitude); }
+    }
+    println!("strongest output frequency: {} Hz", strongest.0);
+    assert!((strongest.0 - 440).abs() <= 5,
+        "expected pitch near 440 Hz, got {} Hz", strongest.0);
+}
