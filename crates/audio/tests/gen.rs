@@ -132,8 +132,8 @@ fn native_raw_envelope_total_level_multiplier_and_am_change_sound() {
     let no_attack = render(&[(92, 0.0)]);
     let attenuated = render(&[(98, 0.5)]);
     let multiple = render(&[(101, 2.0 / 15.0)]);
-    let lfo_off = render(&[(8, 1.0), (60, 8.0 / 8.0)]);
-    let am = render(&[(8, 1.0), (60, 8.0 / 8.0), (105, 1.0)]);
+    let lfo_off = render(&[(8, 1.0), (60, 1.0)]);
+    let am = render(&[(8, 1.0), (60, 1.0), (105, 1.0)]);
     assert!(peak(&normal) > 0.05);
     assert!(
         peak(&no_attack) < 1e-4,

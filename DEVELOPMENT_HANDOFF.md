@@ -20,3 +20,44 @@ Workspace: /workspace/honeydew-ultimate is isolated from the previous /workspace
 - New pure Rust clocked Sega PSG has raw latch writes, 10-bit periods, original attenuation and noise divisors/tone-C feedback, plus bandlimited resampling. Register/noise tests pass.
 - Native tests: four in crates/audio/tests/gen.rs cover actual pitch across sample rates/regions, silence/release/panic, distinct algorithms and finite input handling. Re-run the latest log; their first run found the FNUM issue above.
 - Pending immediately: expose/match all 102 params in the registry and editor, add original presets, finish clipboard operations and VocalTune tracking tests, then run strict checks and consolidate Actions. Do not call the new model production-ready before engine + UI + Android pass together.
+
+## Integration checkpoint (2026-10-29)
+
+Local commits: be14707 (format/audit), 328b599 (optional YM2612/clocked PSG and 16-source host routing),
+2d9d80c (106-parameter editor, algorithms, operator copy/init, patch A/B and 13 original presets),
+67c7135 (bounded vocal octave tracking, DMG sustain, Wave RAM exchange, integration tests).
+Remote Git data commits corresponding to the last three: 22d9878270b2f7452e162ccd03b08293ee3dbae5,
+9cd8d6bac9dc583a366bada03537954f3476b9af, 3f17140b2932688917bd1d48d3c3632862dec8a7.
+These are being published together with the consolidated workflow, to avoid unnecessary builds.
+
+- Gen retains all first 56 parameters and the default Legacy sound model; new projects/presets can choose YM2612.
+  There are now 106 parameters (four native AM enables appended at 102–105). Clocked PSG is also optional.
+  Raw YM envelopes, rate scaling, levels, multipliers, detune, SSG-EG and LFO drive the vendored chip registers.
+  Six FM voices and three PSG tones remain bounded. Host MIDI, piano roll and recorders now address 16 sources.
+  Engine changes release voices with a short output crossfade. A/B slots and operator clipboard are editor-session
+  tools; the selected sound is saved as normal project/preset parameters. PSG Arpeggio is a sound for sequenced
+  arpeggios, not an automatic arpeggiator.
+- New Gen core tests measured A4 within 4 cents at 8/44.1/48/96/192 kHz in PAL and NTSC, silence/release,
+  channel-specific panic, distinct algorithms and actual raw envelope/level/AM effects. C adapter UBSan smoke passes.
+  An initial standalone core benchmark took 0.405 CPU seconds for 3 seconds of chip audio on this host; use the
+  expanded instruments_smoke example for the complete six-voice engine and native ARM64 measurements.
+- DMG: CC123 now honors sustain; CC120 cancels it. Wave clipboard/reset and validated 32-nibble HEX exchange are
+  functional. Wave RAM remains saved in projects/presets. Standalone wave file dialogs are not implemented.
+- VocalTune: octave hysteresis now expires after five consistent detector hops (25 ms), allowing real upward
+  octave changes that previously latched forever. New tests use synthetic harmonic vowels with vibrato,
+  portamento and amplitude changes. No human vocal corpus or subjective listening validation is claimed.
+- The formatting-only remote CI 40948920494 passed fmt and Clippy, then exposed five pre-existing Gen test
+  fixture failures. Selector coverage and the add-channel table have been corrected; browser tests now scroll
+  to rows beyond the viewport instead of assuming the longer instrument list fits. No checks were disabled.
+- Ultimate workflow consolidates format, all-target Clippy, complete workspace library tests, instrument
+  integration/persistence tests, DSP spectral tests, allocation checks, content-tool and wasm compilation,
+  native ARM64 DSP/audio fixtures, and a signed/aligned debug APK. Android builds run only for [android]
+  milestones or manual dispatch. Artifact: Honeydew-VocalTune-GameBoy-Gen-Android-arm64-debug.
+
+Still verifying locally: full application library suite and the new interaction tests; strict Clippy; native
+ARM64/wasm cross compilation; all presets through SongAudioEngine. Logs are in /workspace/.honeydew-build-support/.
+The previous `ultimate-editor-check.log` has overlapping stale output from two processes; use new logs instead.
+Remaining scope: recorded-audio manual pitch editing, real-phone latency/touch/audio testing, full DMG conformance
+ROM harness and revision-specific analog/zombie behavior, console-level YM timers/CSM/channel-3 special mode,
+sample/DAC editor, full hardware-reference comparisons. The optional Nuked engine materially improves operators
+and algorithm fidelity, but the complete musical instrument is not claimed cycle-accurate or 100% faithful.

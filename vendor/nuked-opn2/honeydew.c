@@ -26,7 +26,8 @@ void hd_ym_write(hd_ym *s, unsigned r, unsigned value) {
         return;
     }
     Bit32u bit=1u<<(r&31); unsigned word=r>>5;
-    if((s->valid[word]&bit) && s->desired[r]==value)return;
+    /* The low FNUM write commits the shared high latch even when its own byte is unchanged. */
+    if((r&0xfc)!=0xa0 && (s->valid[word]&bit) && s->desired[r]==value)return;
     s->valid[word]|=bit; s->desired[r]=(Bit8u)value;
     if(!(s->dirty[word]&bit)){s->dirty[word]|=bit; ++s->count;}
 }

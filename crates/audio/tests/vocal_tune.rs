@@ -247,7 +247,7 @@ fn actual_upward_octave_transitions_do_not_remain_latched_to_the_old_note() {
             hard_tune: true,
             ..Default::default()
         });
-        let mut phase = 0.0;
+        let mut phase = 0.0_f32;
         for hz in [110.0, 220.0, 440.0, 220.0, 110.0] {
             for _ in 0..14400 {
                 phase = (phase + hz / 48000.0).fract();
@@ -268,7 +268,7 @@ fn actual_upward_octave_transitions_do_not_remain_latched_to_the_old_note() {
 fn vibrato_portamento_and_amplitude_changes_keep_harmonic_tracking() {
     for rate in [44100, 48000, 96000] {
         let mut fx = VocalTune::new(rate).unwrap();
-        let mut phase = 0.0;
+        let mut phase = 0.0_f32;
         let (mut tracked, mut errors, mut octave_errors) = (0, 0, 0);
         for n in 0..rate {
             let t = n as f32 / rate as f32;

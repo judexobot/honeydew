@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches-ignore: [integration/vocaltune-gameboy-android]
+    branches-ignore: [integration/vocaltune-gameboy-android, integration/ultimate-audio]
   pull_request:
 
 concurrency:

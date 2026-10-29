@@ -2,6 +2,7 @@
 use honeydew_audio::{
     ProcessContext,
     gameboy_instrument::GameBoyInstrument,
+    r#gen::Gen,
     instrument::Instrument,
     vocal_tune::{Parameters, VocalTune},
     wav_writer::WavWriter,
@@ -95,6 +96,42 @@ fn main() {
             "apu-extended"
         } else {
             "apu-authentic"
+        };
+        report.push_str(&format!(
+            "{name},{},3,{elapsed:.6},0\n",
+            std::env::consts::ARCH
+        ));
+        write(&folder.join(format!("{name}.wav")), &left, &right);
+    }
+    for model in [0.0, 1.0] {
+        let mut instrument = Gen::new(48_000.0);
+        instrument.set_parameter(56, model);
+        instrument.set_parameter(58, model);
+        instrument.set_parameter(3, 0.6);
+        instrument.set_parameter(5, 0.25);
+        for (midi, key) in [48, 52, 55, 60, 64, 67].into_iter().enumerate() {
+            instrument.note_on_midi(midi as u8, key, 0.7, midi as f32 / 5.0);
+        }
+        let (mut left, mut right) = (vec![0.0; frames], vec![0.0; frames]);
+        let start = Instant::now();
+        for (i, (l, r)) in left.chunks_mut(257).zip(right.chunks_mut(257)).enumerate() {
+            instrument.set_midi_controller((i % 6) as u8, 4, 0.5 + 0.05 * (i as f32 * 0.1).sin());
+            instrument.process(
+                l,
+                r,
+                ProcessContext {
+                    sample_rate: 48_000.0,
+                    tempo_bpm: 120.0,
+                    start_beat: 0.0,
+                    playing: true,
+                },
+            );
+        }
+        let elapsed = start.elapsed().as_secs_f64();
+        let name = if model >= 0.5 {
+            "gen-ym2612-clocked-psg-six-voices"
+        } else {
+            "gen-legacy-six-voices"
         };
         report.push_str(&format!(
             "{name},{},3,{elapsed:.6},0\n",
