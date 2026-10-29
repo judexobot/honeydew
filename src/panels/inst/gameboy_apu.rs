@@ -42,7 +42,7 @@ fn wave_editor(
     }
     let response = ui.interact(plot, id, Sense::click_and_drag());
     let mut changed = Vec::new();
-    if (response.dragged() || response.clicked())
+    if (response.dragged() || response.clicked() || response.is_pointer_button_down_on())
         && let Some(point) = response.interact_pointer_pos()
     {
         let x = ((point.x - plot.left()) / plot.width() * 32.0)
@@ -59,7 +59,8 @@ fn wave_editor(
             module.params[CUSTOM_WAVE] = 1.0;
             changed.push(CUSTOM_WAVE);
         }
-        let previous = if response.drag_started() {
+        // Capture the initial touch before egui's drag threshold; the first move interpolates from it.
+        let previous = if ui.input(|i| i.pointer.primary_pressed()) {
             None
         } else {
             ui.ctx().data_mut(|d| d.get_temp::<(usize, u8)>(id))
@@ -77,7 +78,7 @@ fn wave_editor(
         }
         ui.ctx().data_mut(|d| d.insert_temp(id, (x, y)));
     }
-    if response.drag_stopped() {
+    if response.drag_stopped() || response.clicked() {
         ui.ctx().data_mut(|d| d.remove::<(usize, u8)>(id));
     }
     changed

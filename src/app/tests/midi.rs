@@ -984,3 +984,22 @@ fn a_frames_midi_notes_and_live_controllers_reach_the_engine_in_input_order() {
         ]
     );
 }
+
+#[test]
+fn hiding_the_app_releases_a_mapped_apu_tap_before_its_gate_expires() {
+    let mut rig = Rig::new();
+    rig.app
+        .add_bare_channel(ChannelKind::Synth(SynthKind::GameBoyApu), 0);
+    rig.app.selected_channel = 1;
+    rig.click(OUTSIDE);
+    assert!(rig.app.audio.running());
+    let keys = rig.plug_midi();
+    rig.take();
+    rig.midi(&keys, &[&[0x90, 60, 100], &[0x80, 60, 0]]);
+    assert_eq!(rig.app.midi.gated_mapped.len(), 1);
+    rig.take();
+    rig.app.on_hidden();
+    assert!(rig.app.midi.gated_mapped.is_empty());
+    let log = rig.take();
+    assert!(log.iter().any(|entry| entry == "MidiNote 1 0 60 None"), "{log:?}");
+}

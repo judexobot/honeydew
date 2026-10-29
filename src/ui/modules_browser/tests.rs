@@ -160,10 +160,11 @@ fn every_current_effect_is_listed_once_and_legacy_ids_never() {
 }
 
 /// The SYNTH rows' module ids by display name.
-const SYNTH_IDS: [(&str, u16); 8] = [
+const SYNTH_IDS: [(&str, u16); 9] = [
     ("3x Osc", 39),
     ("DW Sampler", 1),
     ("GMSynth", 2),
+    ("Game Boy APU", 54),
     ("MiniSynth", 0),
     ("Slicer", 33),
     ("SoundFont Player", 52),
@@ -618,7 +619,7 @@ fn the_rows_are_drawn_in_order_down_the_list() {
     let rig = Rig::new();
     assert!(rig.shows("Modules") && rig.shows("Search") && rig.shows("Sort"));
     let list = rig.layout().list;
-    let ys: Vec<f32> = ["Paste", "Rack Preset", "SYNTH", "3x Osc", "ECHO", "Reverb"]
+    let ys: Vec<f32> = ["Paste", "Rack Preset", "SYNTH", "3x Osc", "ECHO"]
         .iter()
         .map(|t| rig.text_at(t).y)
         .collect();
@@ -778,7 +779,7 @@ fn search_filters_as_you_type_and_hides_again_keeping_its_text() {
     assert!(!rig.shows("Paste"));
     rig.click(search);
     rig.frame(vec![]);
-    assert!(rig.shows("Paste") && rig.shows("Reverb") && !rig.shows("zzz"));
+    assert!(rig.shows("Paste") && rig.shows("Game Boy APU") && !rig.shows("zzz"));
     rig.click(search);
     rig.frame(vec![]);
     assert!(rig.shows("zzz") && !rig.shows("Paste"));
@@ -1077,7 +1078,7 @@ fn every_row_is_in_fontsize_4_and_the_button_labels_in_8_pt() {
     let rig = Rig::new();
     let m = metrics();
     let pt = |s: FontSize| m.font_id(s).size;
-    assert_eq!(rig.font_size("Reverb"), pt(FontSize::Pt18));
+    assert_eq!(rig.font_size("Game Boy APU"), pt(FontSize::Pt18));
     assert_eq!(rig.font_size("Paste"), pt(FontSize::Pt18));
     assert_eq!(rig.font_size("ECHO"), pt(FontSize::Pt12));
     let d = m.u(BUTTON_D);

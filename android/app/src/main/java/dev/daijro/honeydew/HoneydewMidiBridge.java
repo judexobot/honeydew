@@ -20,15 +20,20 @@ final class HoneydewMidiBridge {
     private final List<MidiDevice> devices = new ArrayList<>();
     private final List<MidiOutputPort> ports = new ArrayList<>();
     private int generation;
+    private final MidiManager.DeviceCallback callback = new MidiManager.DeviceCallback() {
+        @Override public void onDeviceRemoved(MidiDeviceInfo device) {
+            if (devices.stream().noneMatch(open -> open.getInfo().getId() == device.getId())) return;
+            // An unplug cannot deliver Note Off. Send All Sound Off on every channel.
+            byte[] panic = new byte[] {(byte) 0xB0, 120, 0};
+            for (int ch = 0; ch < 16; ch++) { panic[0] = (byte) (0xB0 | ch); onMidiMessage(panic, 3); }
+        }
+    };
     HoneydewMidiBridge(Context context) {
         manager = (MidiManager) context.getSystemService(Context.MIDI_SERVICE);
-        if (manager != null) manager.registerDeviceCallback(new MidiManager.DeviceCallback() {
-            @Override public void onDeviceRemoved(MidiDeviceInfo device) {
-                // An unplug cannot deliver Note Off. Send All Sound Off on every channel.
-                byte[] panic = new byte[] {(byte) 0xB0, 120, 0};
-                for (int ch = 0; ch < 16; ch++) { panic[0] = (byte) (0xB0 | ch); onMidiMessage(panic, 3); }
-            }
-        }, handler);
+        if (manager != null) manager.registerDeviceCallback(callback, handler);
+    }
+    void shutdown() {
+        handler.post(() -> { closeNow(); if (manager != null) manager.unregisterDeviceCallback(callback); });
     }
     private static String label(MidiDeviceInfo device, MidiDeviceInfo.PortInfo port) {
         String name = device.getProperties().getString(MidiDeviceInfo.PROPERTY_NAME, "USB MIDI");

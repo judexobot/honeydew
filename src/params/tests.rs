@@ -63,7 +63,7 @@ const OVERVIEW: [(u16, &str, &str, usize, bool, Role); 40] = [
         false,
         Role::NoteEffect,
     ),
-    (53, "VocalTune", "VocalTune", 25, false, Role::Effect),
+    (53, "VocalTune", "VocalTune", 33, false, Role::Effect),
 ];
 
 fn spec(id: u16) -> &'static ModuleSpec {

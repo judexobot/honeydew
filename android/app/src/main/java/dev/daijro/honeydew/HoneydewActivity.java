@@ -216,7 +216,7 @@ public final class HoneydewActivity extends NativeActivity {
 
     @Override
     protected void onDestroy() {
-        closeMidiPorts();
+        if (midiBridge != null) midiBridge.shutdown();
         if (editorDialog != null) editorDialog.dismiss();
         super.onDestroy();
         onDisplayDpi(0);

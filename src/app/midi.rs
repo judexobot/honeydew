@@ -94,6 +94,9 @@ impl HoneydewApp {
         #[cfg(target_os = "android")]
         let hidden = hidden || crate::android::take_resumed();
         self.midi.fresh_mapped.clear();
+        if hidden {
+            self.release_midi();
+        }
         let audio = &mut self.audio;
         let now = self.now;
         self.midi.gated_mapped.retain(|&(at, channel, midi, key)| {
@@ -186,6 +189,15 @@ impl HoneydewApp {
 
     /// Note-offs for every key MIDI holds, each on the channel it plays on.
     pub(super) fn release_midi(&mut self) {
+        self.midi.fresh_mapped.clear();
+        for (_, channel, midi, key) in self.midi.gated_mapped.drain(..) {
+            self.audio.send(AudioCommand::MidiNote {
+                channel,
+                midi,
+                key,
+                velocity: None,
+            });
+        }
         for out in self.midi.router.release_all() {
             self.midi_out(out, 0);
         }

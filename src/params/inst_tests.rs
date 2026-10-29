@@ -52,7 +52,13 @@ const OVERVIEW: [(u16, &str, &str, usize, &[&str]); 9] = [
         &["OSC", "PAN", "VOL", "CUT", "RES", "PITCH", "FILT", "MISC"],
     ),
     (52, "SoundFont Player", "SoundFont Player", 6, &[]),
-    (54, "Game Boy APU", "Game Boy APU", 22, &["PULSE 1", "PULSE 2", "WAVE", "NOISE", "MIX"]),
+    (
+        54,
+        "Game Boy APU",
+        "Game Boy APU",
+        87,
+        &["PULSE 1", "PULSE 2", "WAVE", "NOISE", "MIX"],
+    ),
 ];
 
 fn spec(id: u16) -> &'static ModuleSpec {
