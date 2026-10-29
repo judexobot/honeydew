@@ -472,4 +472,12 @@ pub const ROWS: &[Row] = &[
     (53, 22, r#"A#"#, 1.0, r#"On"#, r#"options: Off, On"#),
     (53, 23, r#"B"#, 1.0, r#"On"#, r#"options: Off, On"#),
     (53, 24, r#"Protect Sibilants"#, 0.75, r#"75%"#, r#"0% … 100%"#),
+    (53, 25, r#"Formant Preserve"#, 1.0, r#"On"#, r#"options: Off, On"#),
+    (53, 26, r#"Formant Shift"#, 0.5, r#"0.0 st"#, r#"-12.0 st … 0.0 st … 12.0 st"#),
+    (53, 27, r#"Vibrato Preservation"#, 0.35, r#"35%"#, r#"0% … 50% … 100%"#),
+    (53, 28, r#"Note Transition"#, 0.15, r#"15 ms"#, r#"0 ms … 50 ms … 100 ms"#),
+    (53, 29, r#"Flex Tune"#, 0.1, r#"10 cents"#, r#"0 cents … 50 cents … 100 cents"#),
+    (53, 30, r#"Input Range"#, 0.0, r#"Full"#, r#"options: Full, Low, Medium, High"#),
+    (53, 31, r#"Output Gain"#, 0.5, r#"0.0 dB"#, r#"-24.0 dB … 0.0 dB … 24.0 dB"#),
+    (53, 32, r#"Quality"#, 0.0, r#"Monitor"#, r#"options: Monitor, Studio"#),
 ];

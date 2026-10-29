@@ -33,8 +33,8 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Engine, UI, persistence and routing regressions
         run: |
-          cargo test --workspace --lib --locked
           cargo test --locked --test integration_instruments
+          cargo test --workspace --lib --locked
       - name: Spectral DSP and callback allocation checks
         run: |
           cargo test -p honeydew-audio --locked --test vocal_tune --test vocal_tune_spectral
