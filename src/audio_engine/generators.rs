@@ -15,6 +15,7 @@ use crate::song::{Channel, ModuleInstance, TimeSig};
 use honeydew_audio::dw_sampler::{DwSampler, DwZone};
 use honeydew_audio::dwp::Cstm;
 use honeydew_audio::gmsynth::{self, GmSynth};
+use honeydew_audio::gameboy_instrument::GameBoyInstrument;
 use honeydew_audio::instrument::{Instrument, InstrumentModule};
 use honeydew_audio::minisynth::MiniSynth;
 use honeydew_audio::soundfont::SoundFontPlayer;
@@ -60,6 +61,7 @@ fn instrument(
             samples,
             origin,
         )?)),
+        54 => Some(Box::new(GameBoyInstrument::new(sample_rate))),
         52 => Some(Box::new(soundfont_player(
             module,
             sample_rate,

@@ -15,7 +15,7 @@ fn every_module_has_a_file() {
     let effects: Vec<u16> = modules().map(|m| m.id).collect();
     assert_eq!(fx::IDS, effects);
     let instruments: Vec<u16> = crate::params::instruments().map(|m| m.id).collect();
-    assert_eq!(inst::IDS, [0, 1, 2, 19, 23, 33, 39, 52]);
+    assert_eq!(inst::IDS, [0, 1, 2, 19, 23, 33, 39, 52, 54]);
     assert_eq!(inst::IDS, instruments);
 }
 

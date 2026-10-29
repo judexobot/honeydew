@@ -12,6 +12,8 @@ pub mod dwp;
 pub mod flac_writer;
 pub mod gm_waveshapes;
 pub mod gmsynth;
+pub mod gameboy_apu;
+pub mod gameboy_instrument;
 pub mod input;
 pub mod instrument;
 pub mod lemon;

@@ -13,6 +13,7 @@ const SPEC: &[(&str, &[&str])] = &[
             "DW Sampler",
             "Lemon Sampler",
             "GMSynth",
+            "Game Boy APU",
             "MiniSynth",
             "Slicer",
             "SoundFont Player",
@@ -824,6 +825,7 @@ fn top_level_lists_the_actions_then_the_instruments_then_the_effects_each_by_typ
             "Slicer",
             "3x Osc",
             "SoundFont Player",
+            "Game Boy APU",
             // The built-in plugins, which have no type id of their own: by name.
             "Lemon Sampler",
             "Lemon Trio",

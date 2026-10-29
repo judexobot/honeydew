@@ -1035,6 +1035,32 @@ const SOUNDFONT_PLAYER: &[P] = &[
     }),
 ];
 
+// Hardware-clocked DMG APU instrument (p0..21).
+const GAMEBOY_APU: &[P] = &[
+    P::ENABLE, // 0
+    P::cont("CH1 Level", 0.87, Display::linear(0.0, 15.0, 0, "")), // 1
+    P::menu("CH1 Duty", 2.0 / 3.0, &["12.5%", "25%", "50%", "75%"]), // 2
+    P::menu("Sweep Pace", 0.0, &["0", "1", "2", "3", "4", "5", "6", "7"]), // 3
+    P::menu("Sweep Shift", 0.0, &["0", "1", "2", "3", "4", "5", "6", "7"]), // 4
+    P::toggle("Sweep Down", 0.0), // 5
+    P::cont("CH2 Level", 0.6, Display::linear(0.0, 15.0, 0, "")), // 6
+    P::menu("CH2 Duty", 1.0 / 3.0, &["12.5%", "25%", "50%", "75%"]), // 7
+    P::menu("Wave Level", 1.0 / 3.0, &["Off", "100%", "50%", "25%"]), // 8
+    P::menu("Waveform", 0.0, &["Triangle", "Saw", "Square", "Sine"]), // 9
+    P::cont("Noise Level", 0.0, Display::linear(0.0, 15.0, 0, "")), // 10
+    P::toggle("Noise 7-bit", 0.0), // 11
+    P::menu("Noise Divisor", 0.0, &["0", "1", "2", "3", "4", "5", "6", "7"]), // 12
+    P::menu("Noise Shift", 0.0, &["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"]), // 13
+    P::menu("Envelope Pace", 0.0, &["0", "1", "2", "3", "4", "5", "6", "7"]), // 14
+    P::menu("Master Volume", 1.0, &["0", "1", "2", "3", "4", "5", "6", "7"]), // 15
+    P::menu("Stereo", 0.0, &["Mono", "Split", "Wide"]), // 16
+    P::cont("Output Gain", 0.75, Display::linear(0.0, 100.0, 0, "%")), // 17
+    P::toggle("CH1 On", 1.0), // 18
+    P::toggle("CH2 On", 1.0), // 19
+    P::toggle("CH3 On", 1.0), // 20
+    P::toggle("CH4 On", 0.0), // 21
+];
+
 pub static MODULES: &[ModuleSpec] = &[
     ModuleSpec::instrument(
         0,
@@ -1086,4 +1112,5 @@ pub static MODULES: &[ModuleSpec] = &[
         SOUNDFONT_PLAYER,
         &[],
     ),
+    ModuleSpec::instrument(54, "Game Boy APU", "Game Boy APU", GAMEBOY_APU, &["PULSE 1", "PULSE 2", "WAVE", "NOISE", "MIX"]),
 ];

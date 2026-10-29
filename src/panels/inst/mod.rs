@@ -2,6 +2,7 @@
 //! (`fx/`).
 
 mod dw_sampler;
+mod gameboy_apu;
 mod gm_synth;
 mod mini_synth;
 pub(crate) mod slicer;
@@ -19,4 +20,5 @@ modules! {
     33 => slicer,
     39 => three_osc,
     52 => soundfont_player,
+    54 => gameboy_apu,
 }
