@@ -1,0 +1,66 @@
+name: Merge Honeydew upstream 0.4.2 (isolated integration branch)
+on:
+  push:
+    branches:
+      - integration/upstream-0.4.2-audio-custom
+    paths:
+      - .github/workflows/merge-upstream-v042.yml
+permissions:
+  contents: write
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: true
+      - name: Merge pinned upstream revision without overwriting custom modules
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'Honeydew upstream integration'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          BEFORE="$(git rev-parse HEAD)"
+          UPSTREAM=0f0198ccdbef785ec198006c2947969d9d93627d
+          git remote add source https://github.com/daijro/honeydew.git
+          git fetch --no-tags --filter=blob:none source "$UPSTREAM"
+          test "$(git rev-parse FETCH_HEAD)" = "$UPSTREAM"
+          if git merge-base --is-ancestor "$UPSTREAM" HEAD; then
+            echo "Revision already integrated"
+            exit 0
+          fi
+          # -X ours chooses our individual conflicting hunks, not our entire files.
+          # Upstream's unrelated changes are included normally.
+          set +e
+          git merge --no-commit --no-ff -X ours "$UPSTREAM"
+          status=$?
+          set -e
+          if test "$status" -ne 0; then
+            echo "Merge reported conflicts; inspecting unresolved paths:"
+            git diff --name-only --diff-filter=U
+            # Keep existing customized files for conflicts that cannot be resolved
+            # at hunk level; refuse any cases where this is not possible.
+            while IFS= read -r -d '' path; do
+              if git cat-file -e ":2:$path" 2>/dev/null; then
+                git checkout --ours -- "$path"
+                git add -- "$path"
+                echo "Preserved custom version for non-text conflict: $path"
+              else
+                echo "Unresolvable without manual inspection: $path" >&2
+                exit 1
+              fi
+            done < <(git diff --name-only --diff-filter=U -z)
+          fi
+          if test -n "$(git diff --name-only --diff-filter=U)"; then
+            echo "Unresolved conflicts left; no push performed" >&2
+            exit 1
+          fi
+          git diff --cached --stat | tail -n 35
+          git commit -m "merge: integrate Honeydew upstream 0.4.2 while preserving custom audio modules"
+          git merge-base --is-ancestor "$UPSTREAM" HEAD
+          git merge-base --is-ancestor "$BEFORE" HEAD
+          test "$(git branch --show-current)" = integration/upstream-0.4.2-audio-custom
+          git push origin HEAD:refs/heads/integration/upstream-0.4.2-audio-custom
