@@ -58,6 +58,10 @@ jobs:
             echo "Unresolved conflicts left; no push performed" >&2
             exit 1
           fi
+          # The job token may not publish updates to GitHub Actions workflows.
+          # Keep the custom branch's existing workflow definitions for this push;
+          # their upstream changes can be integrated separately via the connector.
+          git restore --source="$BEFORE" --staged --worktree -- .github/workflows/ci.yml .github/workflows/release.yml
           git diff --cached --stat | tail -n 35
           git commit -m "merge: integrate Honeydew upstream 0.4.2 while preserving custom audio modules"
           git merge-base --is-ancestor "$UPSTREAM" HEAD
