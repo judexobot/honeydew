@@ -154,6 +154,8 @@ const SECTIONS: [(Option<&str>, &[Entry]); 7] = [
             Entry::Synth(S::GmSynth),
             Entry::Synth(S::GameBoyApu),
             Entry::Synth(S::Gen),
+            #[cfg(all(target_os = "android", feature = "surge-xt"))]
+            Entry::Synth(S::SurgeXt),
             Entry::Synth(S::MiniSynth),
             Entry::Synth(S::Slicer),
             Entry::Synth(S::SoundFontPlayer),
