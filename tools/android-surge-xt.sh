@@ -107,6 +107,27 @@ mkdir -p "$LUA_DST/bin" "$LUA_DST/include"
 cp "$LUA_SRC/libluajit.a" "$LUA_DST/bin/libluajit.a"
 cp "$LUA_SRC/"*.h "$LUA_DST/include/"
 cp "$LUA_SRC/"*.hpp "$LUA_DST/include/"
+# Embed Surge XT's original factory Init Saw patch as native data.
+# This avoids silently running an uninitialized synth on Android and
+# makes the actual official FXP available without external storage rights.
+mkdir -p "$BUILD/generated"
+python3 - "$SRC/resources/data/patches_factory/Templates/Init Saw.fxp" "$BUILD/generated/honeydew_surge_init_patch.h" <<'PY'
+from pathlib import Path
+import sys
+b = Path(sys.argv[1]).read_bytes()
+if len(b) < 61 or b[:4] != b"CcnK" or b[8:12] != b"FPCh" or b[16:20] != b"cjs3":
+    raise SystemExit("Original Surge Init Saw FXP header is not valid")
+n = int.from_bytes(b[56:60], "big")
+if n < 100 or 60 + n > len(b):
+    raise SystemExit("Original Surge Init Saw FXP chunk size is invalid")
+b = b[60:60+n]
+text = "#pragma once\nstatic const unsigned char honeydew_surge_init_data[] = {\n"
+for offset in range(0, len(b), 16):
+    text += "    " + ", ".join(f"0x{v:02x}" for v in b[offset:offset+16]) + ",\n"
+text += "};\n"
+Path(sys.argv[2]).write_text(text)
+PY
+
 # Verify actual object architecture before letting Surge link the library.
 "$TOOLBIN/llvm-ar" p "$LUA_DST/bin/libluajit.a" lj_vm.o > "$LUA_DST/lj_vm-check.o"
 "$TOOLBIN/llvm-readelf" -h "$LUA_DST/lj_vm-check.o" | grep -F 'AArch64'
@@ -127,4 +148,10 @@ LIB="$(find "$BUILD" -type f -name libhoneydew_surge_xt.so -print -quit)"
 [ -n "$LIB" ] && [ -s "$LIB" ] || { echo 'Surge XT shared library not produced' >&2; exit 1; }
 mkdir -p "$JNI"
 cp "$LIB" "$JNI/libhoneydew_surge_xt.so"
+# Android does not ship the NDK libc++_shared runtime as a system library.
+CXX_RUNTIME="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
+test -s "$CXX_RUNTIME"
+cp "$CXX_RUNTIME" "$JNI/libc++_shared.so"
+"$TOOLBIN/llvm-readelf" -h "$LIB" | grep -F 'AArch64'
+"$TOOLBIN/llvm-readelf" --dyn-syms --wide "$LIB" | grep -F 'honeydew_surge_create'
 echo "Original Surge XT native DSP ready: $JNI/libhoneydew_surge_xt.so"
