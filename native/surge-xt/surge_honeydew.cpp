@@ -12,6 +12,7 @@
 #include <memory>
 #include <new>
 #include <string>
+#include <vector>
 
 namespace {
 // Java initializes this once, before starting NativeActivity's Rust engine.
@@ -45,7 +46,13 @@ struct Instance {
                 ? SurgeStorage::skipPatchLoadDataPathSentinel : g_factory_data_path);
         synth->setSamplerate(rate);
         // Decode the actual Surge XT factory Init Saw patch (FXP payload).
-        synth->loadRaw(honeydew_surge_init_data, sizeof(honeydew_surge_init_data), false);
+        // Upstream SurgePatch::load_patch() intentionally byte-swaps fields
+        // *in place* (patch_header::xmlsize and wtsize). Never give it the
+        // compiled const factory array in ELF .rodata: that memory is
+        // write-protected on Android and corrupts/segfaults the patch load.
+        std::vector<uint8_t> writable_init(std::begin(honeydew_surge_init_data),
+                                           std::end(honeydew_surge_init_data));
+        synth->loadRaw(writable_init.data(), static_cast<int>(writable_init.size()), false);
         synth->time_data.tempo = 120.0;
         synth->time_data.ppqPos = 0.0;
         auto &registry = synth->storage.getPatch().param_ptr_by_oscname;
@@ -138,8 +145,14 @@ HONEYDEW_EXPORT int honeydew_surge_load_factory(void *handle, int preset) noexce
     try {
         auto &s = *static_cast<Instance *>(handle)->synth;
         const auto &entry = honeydew_surge_factory[preset - 1];
-        s.loadRaw(honeydew_surge_factory_blob_start + entry.offset, entry.size, false);
-        return 1;
+        // Original Surge loads and endian-decodes its patch_header in place.
+        // The factory bank lives in read-only ELF .rodata, so copy just the
+        // selected FXP into writable, aligned storage before calling loadRaw.
+        std::vector<uint8_t> writable_patch(
+            honeydew_surge_factory_blob_start + entry.offset,
+            honeydew_surge_factory_blob_start + entry.offset + entry.size);
+        s.loadRaw(writable_patch.data(), static_cast<int>(writable_patch.size()), false);
+        return s.patch_loaded ? 1 : 0;
     } catch (...) { return 0; }
 }
 HONEYDEW_EXPORT void honeydew_surge_macro(void *handle, int which, float value) noexcept {
