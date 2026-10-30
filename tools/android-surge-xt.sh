@@ -226,11 +226,11 @@ for symbol in honeydew_surge_create honeydew_surge_destroy \
   honeydew_surge_panic honeydew_surge_all_notes_off \
   honeydew_surge_cc honeydew_surge_pitch_bend \
   honeydew_surge_native_param honeydew_surge_macro \
-  honeydew_surge_load_factory honeydew_surge_render32; do
+  honeydew_surge_load_factory honeydew_surge_probe honeydew_surge_render32; do
   printf '%s\n' "$exports" | grep -Eq "[[:space:]]${symbol}([[:space:]]|$)" || {
     echo "Missing native Surge XT API export: $symbol" >&2
     exit 1
   }
 done
-echo 'Verified all 12 original Surge XT C ABI exports'
+echo 'Verified all 13 original Surge XT C ABI exports including audio self-test'
 echo "Original Surge XT native DSP ready: $JNI/libhoneydew_surge_xt.so"
