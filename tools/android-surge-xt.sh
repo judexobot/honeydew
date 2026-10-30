@@ -43,6 +43,19 @@ git -C "$SRC" cat-file -e "$REV^{commit}"
 git -C "$SRC" checkout --detach "$REV"
 git -C "$SRC" submodule update --init --recursive --jobs 4
 
+# Ship Surge XT's actual factory wavetables, preserving their exact filenames
+# and directory structure. The C++ host scans this content directly, as on
+# desktop; .fxp data alone is insufficient for all wavetable-based presets.
+FACTORY_WT="$SRC/resources/data/wavetables"
+test -s "$FACTORY_WT/Basic/Sine.wt"
+STAGED_WT="$TARGET/android/assets/surge-xt/wavetables"
+rm -rf "$STAGED_WT"
+mkdir -p "$(dirname "$STAGED_WT")"
+cp -a "$FACTORY_WT" "$STAGED_WT"
+test -s "$STAGED_WT/Basic/Sine.wt"
+echo "Bundled original Surge XT stock wavetable assets"
+
+
 # Android Bionic has no glibc execinfo backtrace()/backtrace_symbols().
 # This is sst-plugininfra's optional human-readable diagnostics routine;
 # retaining the original Surge synthesis source and replacing only the
@@ -226,7 +239,8 @@ for symbol in honeydew_surge_create honeydew_surge_destroy \
   honeydew_surge_panic honeydew_surge_all_notes_off \
   honeydew_surge_cc honeydew_surge_pitch_bend \
   honeydew_surge_native_param honeydew_surge_macro \
-  honeydew_surge_load_factory honeydew_surge_probe honeydew_surge_render32; do
+  honeydew_surge_load_factory honeydew_surge_probe honeydew_surge_render32 \
+  Java_dev_daijro_honeydew_HoneydewActivity_nativeSetSurgeFactoryDataDir; do
   # Here-string avoids SIGPIPE under 'set -o pipefail' when grep -q exits
   # as soon as it matches a symbol near the beginning of a large ELF table.
   grep -Eq "[[:space:]]${symbol}([[:space:]]|$)" <<<"$exports" || {
@@ -234,5 +248,5 @@ for symbol in honeydew_surge_create honeydew_surge_destroy \
     exit 1
   }
 done
-echo 'Verified all 13 original Surge XT C ABI exports including audio self-test'
+echo 'Verified all 14 native exports including original factory resource path setup'
 echo "Original Surge XT native DSP ready: $JNI/libhoneydew_surge_xt.so"
