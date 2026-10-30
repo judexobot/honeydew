@@ -9,8 +9,6 @@ mod mini_synth;
 pub(crate) mod slicer;
 pub(crate) mod soundfont_player;
 mod super_saw;
-#[cfg(all(target_os = "android", feature = "surge-xt"))]
-mod surge_xt;
 pub(crate) mod three_osc;
 mod transistor_bass;
 
@@ -25,6 +23,4 @@ modules! {
     52 => soundfont_player,
     54 => gameboy_apu,
     55 => r#gen,
-    #[cfg(all(target_os = "android", feature = "surge-xt"))]
-    57 => surge_xt,
 }
