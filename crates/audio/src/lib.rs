@@ -821,7 +821,7 @@ impl AudioEffect {
             state.prepare_block(context.tempo_bpm);
         }
         let mut peak = MeterSnapshot::default();
-        for (l, r) in left.iter_mut().zip(right.iter_mut()) {
+        for (frame, (l, r)) in left.iter_mut().zip(right.iter_mut()).enumerate() {
             let input = (*l, *r);
             if let Processor::VocalTune(state) = &mut self.processor {
                 let wet = state.process_frame(*l, *r);
@@ -832,7 +832,8 @@ impl AudioEffect {
                     wet
                 };
             } else if runs {
-                let wet = self.processor.process_frame(*l, *r);
+                let key_frame = key.map(|(kl, kr)| (kl[frame], kr[frame]));
+                let wet = self.processor.process_frame_keyed(*l, *r, key_frame);
                 (*l, *r) = self.common.frame((*l, *r), wet);
             }
             peak.peak_left = peak.peak_left.max(l.abs());

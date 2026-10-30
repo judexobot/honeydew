@@ -154,6 +154,11 @@ impl Mixer {
         })
     }
 
+    /// The channels whose rack effects are keyed by the given source channel.
+    pub fn keyed(&self, source: usize) -> &[usize] {
+        self.keyed.get(source).map_or(&[], Vec::as_slice)
+    }
+
     pub fn same_routes(&self, other: &Self) -> bool {
         self.channels.len() == other.channels.len()
             && self.channels.iter().zip(&other.channels).all(|(a, b)| {
