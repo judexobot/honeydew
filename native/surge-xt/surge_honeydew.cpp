@@ -4,6 +4,7 @@
 #include "SurgeSynthesizer.h"
 #include "honeydew_surge_init_patch.h"
 #include "honeydew_surge_factory_bank.h"
+#include <jni.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -13,6 +14,9 @@
 #include <string>
 
 namespace {
+// Java initializes this once, before starting NativeActivity's Rust engine.
+// Actual factory .wt/.wav data reside in the application's private files.
+std::string g_factory_data_path;
 // Exact native Surge OSC parameter keys from the upstream SurgePatch registry,
 // resolved off the realtime thread and cached as original Surge parameter IDs.
 constexpr const char *kPaths[] = {
@@ -37,7 +41,8 @@ struct Instance {
     std::array<int, kParameterCount> param_ids{};
     explicit Instance(float rate) {
         synth = std::make_unique<SurgeSynthesizer>(
-            &host, SurgeStorage::skipPatchLoadDataPathSentinel);
+            &host, g_factory_data_path.empty()
+                ? SurgeStorage::skipPatchLoadDataPathSentinel : g_factory_data_path);
         synth->setSamplerate(rate);
         // Decode the actual Surge XT factory Init Saw patch (FXP payload).
         synth->loadRaw(honeydew_surge_init_data, sizeof(honeydew_surge_init_data), false);
@@ -52,6 +57,19 @@ struct Instance {
     }
 };
 } // namespace
+
+// Called from HoneydewActivity.onCreate before NativeActivity starts Rust;
+// must remain outside the audio callback, since the host path is initialized
+// only once. Android and the C++ DSP use the same original factory wavetable data.
+extern "C" JNIEXPORT void JNICALL
+Java_dev_daijro_honeydew_HoneydewActivity_nativeSetSurgeFactoryDataDir(
+    JNIEnv *env, jclass, jstring path) noexcept {
+    if (!path) return;
+    const char *utf8 = env->GetStringUTFChars(path, nullptr);
+    if (!utf8) return;
+    g_factory_data_path.assign(utf8);
+    env->ReleaseStringUTFChars(path, utf8);
+}
 
 // Export a stable C ABI to Rust even when hiding Surge internal C++ symbols.
 #define HONEYDEW_EXPORT __attribute__((visibility("default")))
