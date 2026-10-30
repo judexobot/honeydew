@@ -994,6 +994,7 @@ impl SongAudioEngine {
                     {
                         return false;
                     }
+                    tap_keys(mixer, processors, buffers, *index);
                     mixer.route_stage_compensated(buffers, stage, &mut self.compensation);
                     continue;
                 }
@@ -1016,6 +1017,9 @@ impl SongAudioEngine {
                 });
                 if result.is_err() {
                     return false;
+                }
+                for &index in &mixer.stages()[stage] {
+                    tap_keys(mixer, processors, buffers, index);
                 }
                 mixer.route_stage_compensated(buffers, stage, &mut self.compensation);
             }
@@ -1040,6 +1044,9 @@ impl SongAudioEngine {
                         return false;
                     }
                 }
+                for &index in &self.mixer.stages()[stage] {
+                    tap_keys(&self.mixer, audio, &self.buffers, index);
+                }
                 self.mixer.route_stage_compensated(
                     &mut self.buffers,
                     stage,
@@ -1048,17 +1055,36 @@ impl SongAudioEngine {
             }
             return true;
         }
-        self.mixer
-            .mix(&mut self.buffers, |index, left, right| {
-                process_rack(
-                    &mut audio[index],
-                    &mut instruments[index],
-                    left,
-                    right,
-                    context,
-                )
-            })
-            .is_ok()
+        for &index in self.mixer.order() {
+            let buffer = &mut self.buffers[index];
+            if process_rack(
+                &mut audio[index],
+                &mut instruments[index],
+                &mut buffer.left,
+                &mut buffer.right,
+                context,
+            )
+            .is_err()
+            {
+                return false;
+            }
+            tap_keys(&self.mixer, audio, &self.buffers, index);
+            self.mixer.route_channel(&mut self.buffers, index);
+        }
+        true
+    }
+}
+
+/// Send the source's pre-fader rack audio to every downstream keyed channel.
+fn tap_keys(
+    mixer: &Mixer,
+    audio: &mut [PlaybackChannel],
+    buffers: &[OwnedStereoBuffer],
+    index: usize,
+) {
+    let source = &buffers[index];
+    for &keyed in mixer.keyed(index) {
+        audio[keyed].take_key(index, &source.left, &source.right);
     }
 }
 

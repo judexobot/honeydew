@@ -162,10 +162,11 @@ impl Mixer {
     pub fn same_routes(&self, other: &Self) -> bool {
         self.channels.len() == other.channels.len()
             && self.channels.iter().zip(&other.channels).all(|(a, b)| {
-                a.sends
-                    .iter()
-                    .map(|s| s.target)
-                    .eq(b.sends.iter().map(|s| s.target))
+                a.keys == b.keys
+                    && a.sends
+                        .iter()
+                        .map(|s| s.target)
+                        .eq(b.sends.iter().map(|s| s.target))
             })
     }
     pub(crate) fn order(&self) -> &[usize] {

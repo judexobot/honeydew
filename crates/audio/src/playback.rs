@@ -388,6 +388,21 @@ impl AudioPlayback {
 }
 
 impl PlaybackChannel {
+    /// Copy the source's pre-fader rack output into preallocated sidechain buffers.
+    /// Never allocates on the audio thread.
+    pub fn take_key(&mut self, source: usize, left: &[f32], right: &[f32]) {
+        let Some((_, key)) = self.keys.iter_mut().find(|(from, _)| *from == source) else {
+            return;
+        };
+        let frames = left.len();
+        if let (Some(key_left), Some(key_right)) =
+            (key.left.get_mut(..frames), key.right.get_mut(..frames))
+        {
+            key_left.copy_from_slice(left);
+            key_right.copy_from_slice(right);
+        }
+    }
+
     /// Only the new VocalTune delay is introduced into existing projects' routing.
     pub fn vocal_latency_before(&self, end: usize) -> usize {
         self.effects
