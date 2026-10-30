@@ -227,7 +227,9 @@ for symbol in honeydew_surge_create honeydew_surge_destroy \
   honeydew_surge_cc honeydew_surge_pitch_bend \
   honeydew_surge_native_param honeydew_surge_macro \
   honeydew_surge_load_factory honeydew_surge_probe honeydew_surge_render32; do
-  printf '%s\n' "$exports" | grep -Eq "[[:space:]]${symbol}([[:space:]]|$)" || {
+  # Here-string avoids SIGPIPE under 'set -o pipefail' when grep -q exits
+  # as soon as it matches a symbol near the beginning of a large ELF table.
+  grep -Eq "[[:space:]]${symbol}([[:space:]]|$)" <<<"$exports" || {
     echo "Missing native Surge XT API export: $symbol" >&2
     exit 1
   }
