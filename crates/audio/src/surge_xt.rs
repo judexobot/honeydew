@@ -163,7 +163,11 @@ impl SurgeXt {
         Ok(Self {
             api,
             instance,
-            first_param: [preset != 0; 33],
+            // The first Honeydew parameter refresh contains *registry defaults*,
+            // not the parameter values in the original Surge FXP. This also
+            // applies to Init Saw (preset 0), whose real factory defaults were
+            // previously overwritten on creation and could make it silent.
+            first_param: [true; 33],
             left: [0.0; BLOCK],
             right: [0.0; BLOCK],
             position: BLOCK,
