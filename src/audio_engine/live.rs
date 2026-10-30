@@ -16,23 +16,27 @@ const PLAIN_CAPACITY: usize = 256;
 
 /// A channel's live keys: its note effects in real time, and per instrument the note effects above it.
 pub(super) struct Live {
-    chain: LiveNoteChain,
+    pub(super) chain: LiveNoteChain,
     midi: Vec<LiveNoteChain>,
     stages: Vec<usize>,
+    /// Its note effects: a note past them all is what its MIDI sends forward.
+    effects: usize,
     /// The channel's current lane is a notes lane; until the app says, its first lane.
     pub notes_lane: bool,
 }
 
-/// The live path of `channel`, whose `instruments` the engine plays; `None` when nothing on it plays a note.
+/// The live path of `channel`, whose `instruments` the engine plays; `None` when nothing on it plays a note and it
+/// `forwards` none (it has no MIDI send).
 pub(super) fn build(
     song: &Song,
     channel: usize,
     instruments: &[(i32, InstrumentModule)],
+    forwards: bool,
     sample_rate: f32,
     tempo_bpm: f32,
 ) -> Result<Option<Live>, EngineError> {
     let kit = song.channels[channel].drum_kit.as_ref();
-    if instruments.is_empty() && kit.is_none_or(|kit| kit.slots.is_empty()) {
+    if instruments.is_empty() && kit.is_none_or(|kit| kit.slots.is_empty()) && !forwards {
         return Ok(None);
     }
     let end_beat = song_end_beat(song)?;
@@ -53,6 +57,7 @@ pub(super) fn build(
     } else {
         CAPACITY
     };
+    let count = effects.len();
     let make_chain = |effects| {
         LiveNoteChain::new(
             effects,
@@ -60,22 +65,11 @@ pub(super) fn build(
             f64::from(sample_rate),
             f64::from(tempo_bpm),
             capacity,
-        )
-        .map_err(EngineError::Notes)
+        ).map_err(EngineError::Notes)
     };
-    let sources = if song.channels[channel]
-        .rack
-        .modules
-        .iter()
-        .any(|m| m.type_id == 55)
-    {
+    let sources = if song.channels[channel].rack.modules.iter().any(|m| m.type_id == 55) {
         16
-    } else if song.channels[channel]
-        .rack
-        .modules
-        .iter()
-        .any(|m| m.type_id == 54)
-    {
+    } else if song.channels[channel].rack.modules.iter().any(|m| m.type_id == 54) {
         4
     } else {
         0
@@ -89,6 +83,7 @@ pub(super) fn build(
         chain,
         midi,
         stages,
+        effects: count,
         notes_lane: lanes
             .first()
             .is_some_and(|lane| lane.kind == LaneKind::Notes),
@@ -143,9 +138,7 @@ impl Live {
     /// Forgets its notes in flight: all notes off on its channel alone.
     pub(super) fn clear(&mut self) {
         self.chain.clear();
-        for chain in &mut self.midi {
-            chain.clear();
-        }
+        for chain in &mut self.midi { chain.clear(); }
     }
 }
 
@@ -160,9 +153,7 @@ impl SongAudioEngine {
         let now = self.live_frame(0);
         for live in self.live.iter_mut().flatten() {
             live.chain.set_tempo(now, f64::from(bpm));
-            for chain in &mut live.midi {
-                chain.set_tempo(now, f64::from(bpm));
-            }
+            for chain in &mut live.midi { chain.set_tempo(now, f64::from(bpm)); }
         }
     }
 
@@ -209,15 +200,18 @@ impl SongAudioEngine {
             super::set_key(&mut self.sounding[channel], key, down & (1u128 << key) != 0);
         }
     }
-    /// Drain the normal chain and each APU MIDI channel independently.
+    /// Sends every live note on and off due at `cursor` into the render call, each channel before the targets of its
+    /// MIDI sends, which get the notes past all its note effects (and a note-off an edit took over) in the same pass.
     pub(super) fn live_due(&mut self, cursor: usize) {
         let now = self.live_frame(cursor);
         let song_beat = self.beat();
-        for channel in 0..self.live.len() {
-            let count = self.live[channel].as_ref().map_or(0, |l| l.midi.len() + 1);
+        for at in 0..self.midi_sends.order.len() {
+            let channel = self.midi_sends.order[at];
+            let count = self.live[channel].as_ref().map_or(0, |l| 1 + l.midi.len());
             for source in 0..count {
                 self.live_out.clear();
-                let live = self.live[channel].as_mut().unwrap();
+                let live = self.live[channel].as_mut().expect("live channel");
+                let past = live.effects;
                 if source == 0 {
                     live.chain.due(now, song_beat, &mut self.live_out);
                 } else {
@@ -225,15 +219,11 @@ impl SongAudioEngine {
                 }
                 for index in 0..self.live_out.len() {
                     let event = self.live_out[index];
-                    self.send_live(
-                        channel,
-                        event,
-                        if source == 0 {
-                            None
-                        } else {
-                            Some((source - 1) as u8)
-                        },
-                    );
+                    let midi = (source != 0).then_some((source - 1) as u8);
+                    self.send_live(channel, event, midi);
+                    if event.level == past || event.route.is_some() {
+                        self.forward_live(channel, event, now);
+                    }
                 }
             }
         }
@@ -264,7 +254,7 @@ impl SongAudioEngine {
                         *lit |= chain.keys_down();
                     }
                 }
-                Some(live) => live.clear(),
+                Some(live) => live.chain.clear(),
                 None => {}
             }
         }
