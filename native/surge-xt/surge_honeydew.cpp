@@ -131,6 +131,31 @@ HONEYDEW_EXPORT void honeydew_surge_macro(void *handle, int which, float value) 
             which, std::clamp(value, 0.0f, 1.0f));
     } catch (...) {}
 }
+// Android runtime audio self-check. The original Init Saw patch must produce
+// non-zero PCM with a standard note; this runs at instrument startup (not in
+// the realtime callback) and never replaces Surge XT sound generation.
+HONEYDEW_EXPORT float honeydew_surge_probe(float sample_rate) noexcept {
+    if (!std::isfinite(sample_rate) || sample_rate < 8000 || sample_rate > 384000)
+        return -1.f;
+    try {
+        Instance instance(sample_rate);
+        auto &s = *instance.synth;
+        s.playNote(0, 60, 112, 0);
+        float peak = 0.f;
+        for (int block = 0; block < 384; ++block) {
+            s.process();
+            for (int i = 0; i < 32; ++i) {
+                const auto l = s.output[0][i];
+                const auto r = s.output[1][i];
+                if (std::isfinite(l)) peak = std::max(peak, std::abs(l));
+                if (std::isfinite(r)) peak = std::max(peak, std::abs(r));
+            }
+        }
+        s.allSoundOff();
+        return peak;
+    } catch (...) { return -1.f; }
+}
+
 // Exactly Surge's native 32-frame process block (SURGE_COMPILE_BLOCK_SIZE=32).
 // No allocation, file I/O or synchronization is performed by this ABI layer.
 HONEYDEW_EXPORT int honeydew_surge_render32(void *handle, float *left, float *right,
