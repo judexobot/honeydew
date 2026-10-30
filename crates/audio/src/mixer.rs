@@ -169,7 +169,7 @@ impl Mixer {
                         .eq(b.sends.iter().map(|s| s.target))
             })
     }
-    pub(crate) fn order(&self) -> &[usize] {
+    pub fn order(&self) -> &[usize] {
         &self.order
     }
     pub(crate) fn sends(&self, channel: usize) -> &[SendMix] {
