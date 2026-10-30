@@ -19,7 +19,14 @@ REV=5a4828a33ac4b2e2b45671b34e9e0e3f0c614765
 if [ ! -d "$SRC/.git" ]; then
   git clone --filter=blob:none https://github.com/surge-synthesizer/surge.git "$SRC"
 fi
-git -C "$SRC" fetch --depth=1 origin "$REV"
+# GitHub occasionally rejects fetching an otherwise valid, advertised HEAD by
+# raw SHA ("upload-pack: not our ref"). Fetch its public branch ref instead,
+# then verify and check out the exact pinned Surge XT revision.
+git -C "$SRC" fetch --depth=1 origin main
+if ! git -C "$SRC" cat-file -e "$REV^{commit}" 2>/dev/null; then
+  git -C "$SRC" fetch --deepen=120 origin main
+fi
+git -C "$SRC" cat-file -e "$REV^{commit}"
 git -C "$SRC" checkout --detach "$REV"
 git -C "$SRC" submodule update --init --recursive --jobs 4
 
