@@ -151,6 +151,14 @@ impl Router {
         out
     }
 
+    /// Held MIDI source keys, including their sounding destinations (used by the
+    /// mapped FM/APU piano keyboard and play-start release logic).
+    pub fn held_midi(&self) -> impl Iterator<Item = (u8, usize)> + '_ {
+        self.held.iter().flat_map(|((_, _, key), targets)| {
+            targets.iter().filter(|(_, sounding)| *sounding).map(move |(ch, _)| (*key, *ch))
+        })
+    }
+
     /// The channels moved: each held key follows its channels by `channel`. A channel that went is dropped, so the
     /// key's note-off goes nowhere there.
     pub fn rekey(&mut self, channel: &dyn Fn(usize) -> Option<usize>) {

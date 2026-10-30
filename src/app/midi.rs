@@ -47,6 +47,8 @@ pub(super) struct Midi {
     /// Each MIDI key sounding, as (channel, controller key, the key it plays under key-lock): its note-off ends that
     /// key, whatever the lock or the current channel has become since (as a typed key's release).
     pub(super) snapped: Vec<(usize, u8, u8)>,
+    fresh_mapped: Vec<(usize, u8, u8)>,
+    pub(super) gated_mapped: Vec<(f64, usize, u8, u8)>,
 }
 
 impl Default for Midi {
@@ -59,6 +61,8 @@ impl Default for Midi {
             reopened: 0,
             linked_at: None,
             snapped: Vec::new(),
+            fresh_mapped: Vec::new(),
+            gated_mapped: Vec::new(),
         }
     }
 }

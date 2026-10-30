@@ -180,16 +180,19 @@ mod tests {
                 level: 0.8531,
                 pan: 0.5,
                 sends: vec![],
+                keys: vec![],
             },
             ChannelMix {
                 level: 0.8531,
                 pan: 0.5,
                 sends: vec![send],
+                keys: vec![],
             },
             ChannelMix {
                 level: 0.8531,
                 pan: 0.5,
                 sends: vec![send],
+                keys: vec![],
             },
         ];
         let mixer = Mixer::new(&strips).unwrap();
