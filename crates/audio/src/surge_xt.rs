@@ -30,6 +30,7 @@ type All = unsafe extern "C" fn(*mut c_void);
 type Cc = unsafe extern "C" fn(*mut c_void, u8, u8, u8);
 type Bend = unsafe extern "C" fn(*mut c_void, u8, i32);
 type Macro = unsafe extern "C" fn(*mut c_void, i32, f32);
+type NativeParam = unsafe extern "C" fn(*mut c_void, i32, f32);
 type Render = unsafe extern "C" fn(*mut c_void, *mut f32, *mut f32, f64, f64, i32) -> i32;
 
 #[derive(Clone, Copy)]
@@ -43,6 +44,7 @@ struct Api {
     cc: Cc,
     bend: Bend,
     macro_value: Macro,
+    native_param: NativeParam,
     render: Render,
 }
 
@@ -68,6 +70,7 @@ impl Api {
             cc: unsafe { symbol(handle, b"honeydew_surge_cc\0")? },
             bend: unsafe { symbol(handle, b"honeydew_surge_pitch_bend\0")? },
             macro_value: unsafe { symbol(handle, b"honeydew_surge_macro\0")? },
+            native_param: unsafe { symbol(handle, b"honeydew_surge_native_param\0")? },
             render: unsafe { symbol(handle, b"honeydew_surge_render32\0")? },
         }))();
         if result.is_none() {
@@ -127,8 +130,14 @@ impl Drop for SurgeXt {
 impl Instrument for SurgeXt {
     fn set_parameter(&mut self, index: usize, value: f32) {
         // p0 is Honeydew's own bypass. p1-p8 are Surge's genuine macros.
-        if (1..=8).contains(&index) && value.is_finite() {
+        if !value.is_finite() {
+            return;
+        }
+        if (1..=8).contains(&index) {
             unsafe { (self.api.macro_value)(self.instance, (index - 1) as i32, value) };
+        } else if (9..=32).contains(&index) {
+            // Fixed 0-based original Surge DSP path ID, resolved during construction.
+            unsafe { (self.api.native_param)(self.instance, (index - 9) as i32, value) };
         }
     }
 

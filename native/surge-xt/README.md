@@ -24,8 +24,8 @@ Surge library is unavailable, this instrument cannot be constructed.
 ## Current scope
 
 Original Surge XT synthesis core and internal initial patch, polyphonic note
-on/off, MIDI pitch bend/CC, 8 macro controls, tempo-linked 32-frame stereo
+on/off, MIDI pitch bend/CC, 8 macro controls, 24 additional real Surge XT engine controls (oscillator, mixer, filter, amp/filter envelopes and LFO), tempo-linked 32-frame stereo
 rendering, and real-time add-to-rack audio. Factory preset browsing,
-serialized Surge patches, modulation matrix editing and the complete
+serialized Surge patches, full modulation-matrix editing and the complete
 Surge XT editor are **not yet wired into the Honeydew UI**. The Android
 build and native audio still require CI and on-device validation.

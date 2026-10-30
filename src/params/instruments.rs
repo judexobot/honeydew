@@ -1701,6 +1701,31 @@ const SURGE_XT: &[P] = &[
     P::plain("Macro 6", 0.0),
     P::plain("Macro 7", 0.0),
     P::plain("Macro 8", 0.0),
+    // Original C++ engine normalized parameters; not approximated DSP.
+    P::plain("Oscillator 1 Type", 0.0), // 9
+    P::plain("Oscillator 2 Type", 0.0), // 10
+    P::plain("Oscillator 3 Type", 0.0), // 11
+    P::plain("Oscillator 1 Pitch", 0.5), // 12
+    P::plain("Oscillator 1 Parameter 1", 0.5), // 13
+    P::plain("Oscillator 1 Level", 0.75), // 14
+    P::plain("Oscillator 2 Level", 0.0), // 15
+    P::plain("Oscillator 3 Level", 0.0), // 16
+    P::plain("Filter 1 Type", 0.0), // 17
+    P::plain("Filter 1 Cutoff", 0.75), // 18
+    P::plain("Filter 1 Resonance", 0.0), // 19
+    P::plain("Filter 1 Env Amount", 0.5), // 20
+    P::plain("Amp Attack", 0.0), // 21
+    P::plain("Amp Decay", 0.3), // 22
+    P::plain("Amp Sustain", 1.0), // 23
+    P::plain("Amp Release", 0.2), // 24
+    P::plain("Filter Attack", 0.0), // 25
+    P::plain("Filter Decay", 0.3), // 26
+    P::plain("Filter Sustain", 0.5), // 27
+    P::plain("Filter Release", 0.2), // 28
+    P::plain("LFO 1 Rate", 0.3), // 29
+    P::plain("LFO 1 Shape", 0.0), // 30
+    P::plain("LFO 1 Depth", 0.75), // 31
+    P::plain("Master Level", 0.75), // 32
 ];
 
 pub static MODULES: &[ModuleSpec] = &[
@@ -1769,5 +1794,6 @@ pub static MODULES: &[ModuleSpec] = &[
         &["FM", "OP1", "OP2", "OP3", "OP4", "LFO", "PSG", "OUTPUT"],
     ),
     #[cfg(all(target_os = "android", feature = "surge-xt"))]
-    ModuleSpec::instrument(57, "Surge XT", "Surge XT", SURGE_XT, &["MACROS", "MIDI"]),
+    ModuleSpec::instrument(57, "Surge XT", "Surge XT", SURGE_XT,
+        &["MACROS", "OSC", "MIX", "FILTER", "AMP ENV", "FILT ENV", "LFO", "MIDI"]),
 ];
