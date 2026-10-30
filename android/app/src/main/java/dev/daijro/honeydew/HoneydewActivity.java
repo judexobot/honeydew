@@ -3,6 +3,8 @@ package dev.daijro.honeydew;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.app.AlertDialog;
+import android.content.res.AssetManager;
+import android.util.Log;
 import android.app.NativeActivity;
 import android.content.Intent;
 import android.content.res.Configuration;
@@ -42,6 +44,66 @@ public final class HoneydewActivity extends NativeActivity {
     }
 
     private HoneydewMidiBridge midiBridge;
+    private static native void nativeSetSurgeFactoryDataDir(String root);
+
+    // Surge's original factory wavetable files are shipped alongside the real
+    // C++ engine. Copy once into Android-private storage because Surge XT scans
+    // factory wavetable directories with native filesystem APIs, not AssetManager.
+    private static final String SURGE_WT_SOURCE = "surge-xt/wavetables";
+    private static final String SURGE_REV = "5a4828a33ac4b2e2b45671b34e9e0e3f0c614765";
+
+    private static void copySurgeAssets(AssetManager assets, String assetDir, File target)
+            throws java.io.IOException {
+        String[] children = assets.list(assetDir);
+        if (children == null || children.length == 0) {
+            try (InputStream in = assets.open(assetDir);
+                 OutputStream out = new FileOutputStream(target)) {
+                byte[] buffer = new byte[65536];
+                for (int count; (count = in.read(buffer)) >= 0;) {
+                    if (count > 0) out.write(buffer, 0, count);
+                }
+            }
+            return;
+        }
+        if (!target.isDirectory() && !target.mkdirs())
+            throw new java.io.IOException("Cannot create " + target);
+        for (String name : children) {
+            if (name.equals(".") || name.equals("..") || name.indexOf('/') >= 0)
+                throw new java.io.IOException("Unsafe factory asset path");
+            copySurgeAssets(assets, assetDir + "/" + name, new File(target, name));
+        }
+    }
+
+    private static void deleteSurgeAssets(File item) throws java.io.IOException {
+        File[] children = item.isDirectory() ? item.listFiles() : null;
+        if (children != null)
+            for (File child : children) deleteSurgeAssets(child);
+        if (item.exists() && !item.delete())
+            throw new java.io.IOException("Cannot replace old Surge factory data");
+    }
+
+    private void prepareSurgeFactoryData() {
+        // The ordinary (non-Surge) build contains no assets in this folder.
+        try {
+            if (getAssets().list(SURGE_WT_SOURCE).length == 0) return;
+            File root = new File(getFilesDir(), "surge-xt-factory");
+            File marker = new File(root, ".revision");
+            if (!marker.isFile() ||
+                    !SURGE_REV.equals(new String(java.nio.file.Files.readAllBytes(
+                            marker.toPath()), java.nio.charset.StandardCharsets.UTF_8))) {
+                if (root.exists()) deleteSurgeAssets(root);
+                copySurgeAssets(getAssets(), SURGE_WT_SOURCE, new File(root, "wavetables"));
+                try (OutputStream out = new FileOutputStream(marker)) {
+                    out.write(SURGE_REV.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+            }
+            nativeSetSurgeFactoryDataDir(root.getAbsolutePath());
+            Log.i("HoneydewSurgeXT", "Original Surge XT factory wavetables initialized");
+        } catch (java.io.IOException | UnsatisfiedLinkError e) {
+            Log.e("HoneydewSurgeXT", "Cannot initialize original factory wavetables", e);
+        }
+    }
+
     private static native void onRecordingPermission(boolean granted);
     private static native void onAudioActive(boolean active);
     @Override protected void onPause() { onAudioActive(false); super.onPause(); }
@@ -70,6 +132,8 @@ public final class HoneydewActivity extends NativeActivity {
     protected void onCreate(Bundle state) {
         // Publish physical density before NativeActivity starts the Rust app thread.
         onDisplayDpi(getResources().getDisplayMetrics().xdpi);
+        // Must finish before NativeActivity starts the Rust synthesis engine.
+        prepareSurgeFactoryData();
         super.onCreate(state);
         midiBridge = new HoneydewMidiBridge(this);
         hideSystemBars();
