@@ -57,6 +57,21 @@ if old_end not in s:
 p.write_text(s.replace(old_end, new_end, 1))
 PY
 
+# Surge's Linux CMake target links -lpthread, but Android Bionic provides
+# pthreads directly in libc (there is no separate libpthread to link).
+# Preserve SIMD and all other upstream Surge core dependencies.
+python3 - "$SRC/src/common/CMakeLists.txt" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text()
+old = '      pthread\n'
+new = '      $<$<NOT:$<PLATFORM_ID:Android>>:pthread>\n'
+if s.count(old) != 2:
+    raise SystemExit("Pinned Surge common CMake pthread branches changed")
+p.write_text(s.replace(old, new))
+PY
+
 # The upstream files remain a verified Git checkout. Only its *build file*
 # gets a local include for the Honeydew-specific linkage target.
 python3 - "$SRC/CMakeLists.txt" "$ROOT/native/surge-xt/bridge.cmake" <<'PY'
