@@ -1,0 +1,52 @@
+name: Surge XT · original native Android instrument
+on:
+  push:
+    branches: [feature/surge-xt-native-instrument]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: surge-original-android-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  android-surge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CARGO_BUILD_JOBS: "2"
+      SURGE_BUILD_JOBS: "2"
+      HONEYDEW_SURGE_XT: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: surge-xt-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install Android compiler and libraries
+        run: |
+          sudo apt-get update && sudo apt-get install -y libclang-dev clang ninja-build
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.0.13004108'
+          cargo install cargo-ndk --version 4.1.2 --locked
+      - name: Build real Surge XT C++ DSP for ARM64
+        run: |
+          ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.0.13004108" bash tools/android-surge-xt.sh
+      - name: Build native Honeydew and signed APK with Surge XT
+        run: |
+          ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.0.13004108" ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/28.0.13004108" sh tools/android-dist.sh
+      - name: Upload actual Surge XT-powered Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Honeydew-042-Original-Surge-XT-Android-ARM64
+          path: target/honeydew-android-*-arm64-debug.apk
+          if-no-files-found: error
+          retention-days: 7
