@@ -1,31 +1,48 @@
-# Native Surge XT in Honeydew (GPL-3.0-or-later)
+# Honeydew · Original Surge XT factory preset instrument
 
-This integration links the **original Surge XT C++ core**, `surge-common`, into
-`libhoneydew_surge_xt.so`, instead of rewriting its oscillators, envelopes,
-filters or effects in Rust. The Rust instrument uses a minimal C ABI to send
-notes, MIDI controls and Surge macros, then sums the actual original Surge output.
+This is the **original Surge XT C++ synthesis engine**, linked from
+`surge-common` into an Android ARM64 library. It does **not** recreate any
+oscillator, filter, FX, envelope, LFO or patch sound in Rust.
 
-Upstream: https://github.com/surge-synthesizer/surge
-Pinned source revision: `5a4828a33ac4b2e2b45671b34e9e0e3f0c614765`
-License: GPL-3.0-or-later. Keep the corresponding Surge XT source available.
+## Product scope
 
-## Android compilation
+Surge XT is a **factory-preset player** in Honeydew, with no custom synth
+editor, no simulated controls and no dependency on Surge's desktop GUI.
 
-Run `tools/android-surge-xt.sh` from the Honeydew checkout (after setting
-ANDROID_NDK_HOME). The script checks out a pinned Surge revision and all of
-its upstream submodules, configures the original CMake project with JUCE plugin
-wrappers disabled, and builds `libhoneydew_surge_xt.so`. It copies the
-library into Honeydew's Android `jniLibs` alongside `libhoneydew.so`.
-Then build Honeydew with `cargo ndk ... --features surge-xt`.
+- The built-in Honeydew preset browser lists **641 original Surge XT factory
+  FXP patches** in their **17 original categories**, sorted alphabetically.
+- Selecting a sound instantiates the original native Surge synth and loads its
+  corresponding complete upstream FXP binary.
+- Honeydew sequences actual MIDI notes to this synthesizer and mixes its original
+  stereo PCM into the existing audio graph.
+- A change of factory FXP builds a new engine outside the realtime audio thread.
+- Original Surge XT **factory wavetables** are packaged into Android assets and
+  extracted once into the application's private storage. The native Surge engine
+  scans the exact `.wt` and `.wav` files for stock oscillator resources.
+- An Init Saw PCM self-test runs on first use and reports native failures through
+  Android logcat (tag `HoneydewSurgeXT`). It is a diagnostic, not substituted audio.
 
-The bridge never falls back to a fake synthesis engine. If the actual native
-Surge library is unavailable, this instrument cannot be constructed.
+The original engine can receive standard MIDI pitch bend, notes and CCs; the
+integration retains internal compatibility data for existing Honeydew projects.
 
-## Current scope
+## Corresponding source, license and Android build
 
-Original Surge XT synthesis core and internal initial patch, polyphonic note
-on/off, MIDI pitch bend/CC, 8 macro controls, 24 additional real Surge XT engine controls (oscillator, mixer, filter, amp/filter envelopes and LFO), tempo-linked 32-frame stereo
-rendering, and real-time add-to-rack audio. Factory preset browsing,
-serialized Surge patches, full modulation-matrix editing and the complete
-Surge XT editor are **not yet wired into the Honeydew UI**. The Android
-build and native audio still require CI and on-device validation.
+Original upstream: https://github.com/surge-synthesizer/surge
+Pinned revision: `5a4828a33ac4b2e2b45671b34e9e0e3f0c614765`
+Upstream license: GPL-3.0-or-later.
+
+Set `ANDROID_NDK_HOME`, then run:
+```sh
+bash tools/android-surge-xt.sh
+HONEYDEW_SURGE_XT=1 sh tools/android-dist.sh
+```
+
+The build verifies the ARM64 native ELF C ABI, real original FXP bank manifest,
+factory wavetable assets and the APK's bundled libraries.
+
+## Validation status
+
+Compilation/packaging does not prove that audio output works on a real phone.
+The next Android APK must still be checked using real notes and several factory
+presets, in particular wavetable, FM and FX-based sounds. Failures should be
+diagnosed from the `HoneydewSurgeXT` logcat tag, not hidden by a fake synth.
