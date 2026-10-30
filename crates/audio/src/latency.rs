@@ -179,16 +179,19 @@ mod tests {
             ChannelMix {
                 level: 0.8531,
                 pan: 0.5,
+                keys: vec![],
                 sends: vec![],
             },
             ChannelMix {
                 level: 0.8531,
                 pan: 0.5,
+                keys: vec![],
                 sends: vec![send],
             },
             ChannelMix {
                 level: 0.8531,
                 pan: 0.5,
+                keys: vec![],
                 sends: vec![send],
             },
         ];
