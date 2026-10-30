@@ -16,9 +16,22 @@ BUILD="$TARGET/surge-xt-android"
 JNI="$TARGET/android/jniLibs/arm64-v8a"
 REV=5a4828a33ac4b2e2b45671b34e9e0e3f0c614765
 
+# Rust's CI cache may restore an unrelated Git repository under target/.
+# Never silently fetch the Honeydew origin as if it were Surge's upstream.
+# A fresh checkout also prevents locally patched submodules from surviving.
+if [ -d "$SRC/.git" ]; then
+  remote="$(git -C "$SRC" config --get remote.origin.url || true)"
+  if [ "$remote" != "https://github.com/surge-synthesizer/surge.git" ]; then
+    echo "Discarding incorrect cached Surge source origin: $remote"
+    rm -rf "$SRC"
+  fi
+fi
 if [ ! -d "$SRC/.git" ]; then
+  rm -rf "$SRC"
   git clone --filter=blob:none https://github.com/surge-synthesizer/surge.git "$SRC"
 fi
+git -C "$SRC" remote set-url origin https://github.com/surge-synthesizer/surge.git
+echo "Verified Surge upstream: $(git -C "$SRC" remote get-url origin)"
 # GitHub occasionally rejects fetching an otherwise valid, advertised HEAD by
 # raw SHA ("upload-pack: not our ref"). Fetch its public branch ref instead,
 # then verify and check out the exact pinned Surge XT revision.
