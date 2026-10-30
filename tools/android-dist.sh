@@ -80,6 +80,10 @@ with zipfile.ZipFile(sys.argv[1]) as apk:
     native_libs = ['libhoneydew.so', 'libc++_shared.so']
     if __import__('os').environ.get('HONEYDEW_SURGE_XT') == '1':
         native_libs.append('libhoneydew_surge_xt.so')
+        # Presets may reference original Surge XT factory wavetable files.
+        # Fail rather than shipping a silently degraded native synth.
+        factory_wave = 'assets/surge-xt/wavetables/Basic/Sine.wt'
+        assert len(apk.read(factory_wave)) > 100, 'missing original Surge XT wavetable assets'
     for lib in native_libs:
         assert apk.getinfo('lib/arm64-v8a/' + lib).compress_type == zipfile.ZIP_STORED, lib
     assert apk.read('assets/content/CREDITS.txt'), 'missing sound credits'
