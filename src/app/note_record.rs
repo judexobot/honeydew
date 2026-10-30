@@ -451,6 +451,11 @@ fn choose_midi(
     bar: u32,
     midi: Option<u8>,
 ) -> (usize, u32, Option<usize>) {
+    if midi.is_none() {
+        // Preserve the original untagged recording path; the MIDI-specific
+        // picker only needs to handle lanes with an explicit channel.
+        return choose(ch, drums, start, current, bar);
+    }
     let covers = |c: &Clip| {
         let from = f64::from(c.start_tick);
         (from..from + c.visible_ticks()).contains(&(start as f64))

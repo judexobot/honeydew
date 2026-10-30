@@ -219,7 +219,12 @@ impl SongAudioEngine {
                 }
                 for index in 0..self.live_out.len() {
                     let event = self.live_out[index];
-                    let midi = (source != 0).then_some((source - 1) as u8);
+                    // then_some is eager, so source == 0 would underflow here.
+                    let midi = if source == 0 {
+                        None
+                    } else {
+                        Some((source - 1) as u8)
+                    };
                     self.send_live(channel, event, midi);
                     if event.level == past || event.route.is_some() {
                         self.forward_live(channel, event, now);
