@@ -6,7 +6,7 @@ use std::sync::{
     atomic::{AtomicU32, Ordering},
     mpsc::SyncSender,
 };
-static SEND: Mutex<Option<(SyncSender<Vec<u8>>, Option<Context>)>> = Mutex::new(None);
+static SEND: Mutex<Option<(SyncSender<crate::midi::device::Message>, Option<Context>)>> = Mutex::new(None);
 static GENERATION: AtomicU32 = AtomicU32::new(0);
 pub fn ports() -> Vec<String> {
     let mut result = Vec::new();
@@ -39,7 +39,7 @@ impl Drop for Session {
 }
 pub fn open(
     choice: &str,
-    tx: SyncSender<Vec<u8>>,
+    tx: SyncSender<crate::midi::device::Message>,
     ctx: Option<Context>,
 ) -> Result<Session, String> {
     let generation = GENERATION.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
@@ -79,7 +79,7 @@ pub extern "system" fn Java_dev_daijro_honeydew_HoneydewMidiBridge_onMidiMessage
     }
     if let Ok(send) = SEND.lock()
         && let Some((tx, ctx)) = &*send
-        && tx.try_send(bytes).is_ok()
+        && tx.try_send(("Android MIDI".to_owned(), bytes)).is_ok()
         && let Some(ctx) = ctx
     {
         ctx.request_repaint();
