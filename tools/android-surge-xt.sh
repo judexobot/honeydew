@@ -84,6 +84,33 @@ if addon not in text:
     cmake.write_text(text + addon)
 PY
 
+# Surge's upstream LuaJIT CMake helper runs make using the Linux HOST
+# compiler. Cross-build LuaJIT with the Android NDK instead, including its
+# host-side buildvm generator and real AArch64 target VM, and place the result
+# where the original luajitlib CMake target looks for a prebuilt archive.
+# This keeps Formula LFO and Lua-powered wavetable synthesis enabled.
+TOOLBIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+LUA_CC="$TOOLBIN/aarch64-linux-android26-clang"
+LUA_AR="$TOOLBIN/llvm-ar"
+LUA_SRC="$SRC/libs/luajitlib/LuaJIT/src"
+LUA_DST="$BUILD/libs/luajitlib/LuaJIT"
+test -x "$LUA_CC"
+test -x "$LUA_AR"
+make -C "$LUA_SRC" clean
+make -C "$LUA_SRC" --jobs "${SURGE_BUILD_JOBS:-3}" amalg \
+  BUILDMODE=static HOST_CC=cc TARGET_SYS=Linux \
+  TARGET_CC="$LUA_CC" TARGET_STCC="$LUA_CC" TARGET_LD="$LUA_CC" \
+  TARGET_AR="$LUA_AR rcus" TARGET_CFLAGS="-fPIC -fvisibility=hidden"
+test -s "$LUA_SRC/libluajit.a"
+mkdir -p "$LUA_DST/bin" "$LUA_DST/include"
+cp "$LUA_SRC/libluajit.a" "$LUA_DST/bin/libluajit.a"
+cp "$LUA_SRC/"*.h "$LUA_DST/include/"
+cp "$LUA_SRC/"*.hpp "$LUA_DST/include/"
+# Verify actual object architecture before letting Surge link the library.
+"$TOOLBIN/llvm-ar" p "$LUA_DST/bin/libluajit.a" lj_vm.o > "$LUA_DST/lj_vm-check.o"
+"$TOOLBIN/llvm-readelf" -h "$LUA_DST/lj_vm-check.o" | grep -F 'AArch64'
+rm "$LUA_DST/lj_vm-check.o"
+
 cmake -S "$SRC" -B "$BUILD" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
