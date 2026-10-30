@@ -1689,6 +1689,20 @@ const GEN: &[P] = &[
     P::toggle("OP4 AM Enable", 0.0),
 ];
 
+// The eight automation controls are Surge XT's actual macro slots (not a synthetic model).
+#[cfg(all(target_os = "android", feature = "surge-xt"))]
+const SURGE_XT: &[P] = &[
+    P::ENABLE,
+    P::plain("Macro 1", 0.0),
+    P::plain("Macro 2", 0.0),
+    P::plain("Macro 3", 0.0),
+    P::plain("Macro 4", 0.0),
+    P::plain("Macro 5", 0.0),
+    P::plain("Macro 6", 0.0),
+    P::plain("Macro 7", 0.0),
+    P::plain("Macro 8", 0.0),
+];
+
 pub static MODULES: &[ModuleSpec] = &[
     ModuleSpec::instrument(
         0,
@@ -1754,4 +1768,6 @@ pub static MODULES: &[ModuleSpec] = &[
         GEN,
         &["FM", "OP1", "OP2", "OP3", "OP4", "LFO", "PSG", "OUTPUT"],
     ),
+    #[cfg(all(target_os = "android", feature = "surge-xt"))]
+    ModuleSpec::instrument(57, "Surge XT", "Surge XT", SURGE_XT, &["MACROS", "MIDI"]),
 ];
