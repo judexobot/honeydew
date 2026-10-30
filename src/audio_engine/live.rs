@@ -219,8 +219,10 @@ impl SongAudioEngine {
     pub(super) fn live_due(&mut self, cursor: usize) {
         let now = self.live_frame(cursor);
         let song_beat = self.beat();
-        for channel in 0..self.live.len() {
+        for at in 0..self.midi_sends.order.len() {
+            let channel = self.midi_sends.order[at];
             let count = self.live[channel].as_ref().map_or(0, |l| l.midi.len() + 1);
+            let past = self.live[channel].as_ref().map_or(0, |l| l.effects);
             for source in 0..count {
                 self.live_out.clear();
                 let live = self.live[channel].as_mut().unwrap();
@@ -240,6 +242,10 @@ impl SongAudioEngine {
                             Some((source - 1) as u8)
                         },
                     );
+                    // Only notes past this channel's note effects are forwarded through MIDI sends.
+                    if source == 0 && (event.level == past || event.route.is_some()) {
+                        self.forward_live(channel, event, now);
+                    }
                 }
             }
         }

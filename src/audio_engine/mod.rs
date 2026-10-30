@@ -286,6 +286,9 @@ impl SongAudioEngine {
         let (mixes, routing) = routing::build(song);
         let midi_sends = midi_sends::build(song);
         let mixer = Mixer::new(&mixes).map_err(EngineError::Mixer)?;
+        for &(channel, instance_id, source) in &routing.keyed {
+            let _ = bridge.audio.set_key(channel, instance_id, source, BLOCK_FRAMES);
+        }
         let maximum: Vec<_> = bridge
             .audio
             .channels_mut()
@@ -867,6 +870,7 @@ impl SongAudioEngine {
     }
 
     fn render_segment(&mut self, output: &mut [f32], channels: usize, frames: usize) {
+        self.modulate(self.rolling());
         if self.compensation.enabled() {
             for (index, channel) in self.audio.channels_mut().iter().enumerate() {
                 self.compensation
@@ -1279,6 +1283,7 @@ impl AudioRenderer for SongAudioEngine {
         self.preview = old.preview.take();
         self.take_input(old);
         if self.adopt {
+            old.modulate(false);
             if self.routing.ids == old.routing.ids
                 && self.mixer.same_routes(&old.mixer)
                 && self.compensation.maximum() == old.compensation.maximum()
