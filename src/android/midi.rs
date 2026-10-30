@@ -1,6 +1,6 @@
 //! Android USB MIDI, outside the real-time rendering thread.
 use eframe::egui::Context;
-use jni::objects::{JByteArray, JClass, JObjectArray};
+use jni::objects::{JByteArray, JClass, JObjectArray, JString};
 use std::sync::{
     Mutex,
     atomic::{AtomicU32, Ordering},
@@ -58,8 +58,9 @@ pub fn open(
 }
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_daijro_honeydew_HoneydewMidiBridge_onMidiMessage(
-    env: jni::JNIEnv<'_>,
+    mut env: jni::JNIEnv<'_>,
     _: JClass<'_>,
+    device_name: JString<'_>,
     message: JByteArray<'_>,
     count: jni::sys::jint,
 ) {
@@ -77,9 +78,13 @@ pub extern "system" fn Java_dev_daijro_honeydew_HoneydewMidiBridge_onMidiMessage
     if crate::midi::MidiMsg::parse(&bytes).is_none() {
         return;
     }
+    let name: String = match env.get_string(&device_name) {
+        Ok(name) => name.into(),
+        Err(_) => return,
+    };
     if let Ok(send) = SEND.lock()
         && let Some((tx, ctx)) = &*send
-        && tx.try_send(("Android MIDI".to_owned(), bytes)).is_ok()
+        && tx.try_send((name, bytes)).is_ok()
         && let Some(ctx) = ctx
     {
         ctx.request_repaint();
