@@ -64,6 +64,8 @@ fn instrument(
         )?)),
         54 => Some(Box::new(GameBoyInstrument::new(sample_rate))),
         55 => Some(Box::new(Gen::new(sample_rate))),
+        #[cfg(all(target_os = "android", feature = "surge-xt"))]
+        57 => Some(Box::new(honeydew_audio::surge_xt::SurgeXt::new(sample_rate).ok()?)),
         52 => Some(Box::new(soundfont_player(
             module,
             sample_rate,
