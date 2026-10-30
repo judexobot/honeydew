@@ -3,7 +3,7 @@ use crate::panels::build::*;
 
 pub fn panel() -> Option<Panel> {
     Some(Panel::new(vstack([
-        tabs(0, "MACROS · OSC · MIX · FILTER · AMP ENV · FILT ENV · LFO · MIDI")
+        tabs(0, "MACROS · OSC · MIX · FILTER · AMP ENV · FILT ENV · LFO · PRESETS · MIDI")
             .h(Size::U(1.25)),
         hstack([
             knob(101, "Macro 1").p(1),
@@ -56,10 +56,16 @@ pub fn panel() -> Option<Panel> {
             knob(131, "LFO Depth").p(31),
         ]).h(Size::U(2.4)).show(Show::Tab(6)),
         vstack([
+            text(203, "641 ORIGINAL SURGE XT FACTORY PRESETS").h(Size::U(0.75)),
+            text(204, "Tap the preset name above (Default) to browse by category.").h(Size::U(0.75)),
+            text(205, "Basses, Brass, FX, Keys, Leads, Pads, Plucks, and more.").h(Size::U(0.75)),
+            text(206, "These load Surge XT's original FXP sound data.").h(Size::U(0.75)),
+        ]).h(Size::U(3.2)).show(Show::Tab(7)),
+        vstack([
             text(200, "SURGE XT · ORIGINAL DSP").h(Size::U(0.75)),
             text(201, "Polyphonic MIDI · Pitch Bend · CC · 8 Macros").h(Size::U(0.75)),
             text(202, "Native original Surge XT C++ engine").h(Size::U(0.75)),
-        ]).h(Size::U(3.2)).show(Show::Tab(7)),
+        ]).h(Size::U(3.2)).show(Show::Tab(8)),
     ])))
 }
 #[cfg(test)]

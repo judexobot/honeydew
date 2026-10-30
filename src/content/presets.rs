@@ -29,6 +29,8 @@ use std::path::Path;
 mod r#gen;
 mod gm_synth;
 mod three_osc;
+#[cfg(all(target_os = "android", feature = "surge-xt"))]
+mod surge_xt;
 
 use super::{Entry, PRESETS, ROOT};
 use crate::flm;
@@ -50,14 +52,17 @@ pub struct Preset {
 
 /// Every bank: a module type and its presets.
 fn banks() -> impl Iterator<Item = (u16, &'static [Preset])> {
-    once((0, MINISYNTH))
+    let standard = once((0, MINISYNTH))
         .chain(once((23, SUPERSAW)))
         .chain(once((19, TRANSISTOR_BASS)))
         .chain(once((2, gm_synth::BANK)))
         .chain(once((39, three_osc::BANK)))
         .chain(once((53, VOCALTUNE)))
         .chain(once((54, GAMEBOY)))
-        .chain(once((55, r#gen::BANK)))
+        .chain(once((55, r#gen::BANK)));
+    #[cfg(all(target_os = "android", feature = "surge-xt"))]
+    let standard = standard.chain(once((57, surge_xt::bank())));
+    standard
 }
 
 /// The param `name` names in `spec`, as [`ModuleInstance::param`] indexes it: `#n` (digits only), or the one param or

@@ -1726,6 +1726,9 @@ const SURGE_XT: &[P] = &[
     P::plain("LFO 1 Shape", 0.0), // 30
     P::plain("LFO 1 Depth", 0.75), // 31
     P::plain("Master Level", 0.75), // 32
+    // 0 is the official factory Init Saw; 1..641 select original FXPs.
+    // The native synth constructs this preset before entering the audio callback.
+    P::plain("Factory Preset", 0.0), // 33
 ];
 
 pub static MODULES: &[ModuleSpec] = &[
@@ -1795,5 +1798,5 @@ pub static MODULES: &[ModuleSpec] = &[
     ),
     #[cfg(all(target_os = "android", feature = "surge-xt"))]
     ModuleSpec::instrument(57, "Surge XT", "Surge XT", SURGE_XT,
-        &["MACROS", "OSC", "MIX", "FILTER", "AMP ENV", "FILT ENV", "LFO", "MIDI"]),
+        &["MACROS", "OSC", "MIX", "FILTER", "AMP ENV", "FILT ENV", "LFO", "PRESETS", "MIDI"]),
 ];

@@ -65,7 +65,18 @@ fn instrument(
         54 => Some(Box::new(GameBoyInstrument::new(sample_rate))),
         55 => Some(Box::new(Gen::new(sample_rate))),
         #[cfg(all(target_os = "android", feature = "surge-xt"))]
-        57 => Some(Box::new(honeydew_audio::surge_xt::SurgeXt::new(sample_rate).ok()?)),
+        57 => {
+            // A factory preset is a different original Surge patch, so rebuild
+            // it on the app thread. Never decode FXPs in the audio callback.
+            let value = module.params.get(33).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+            let patch = (value * honeydew_audio::surge_xt::FACTORY_PRESET_COUNT as f32).round()
+                as usize;
+            patch.hash(origin);
+            Some(Box::new(
+                honeydew_audio::surge_xt::SurgeXt::new_with_factory_preset(sample_rate, patch)
+                    .ok()?,
+            ))
+        },
         52 => Some(Box::new(soundfont_player(
             module,
             sample_rate,

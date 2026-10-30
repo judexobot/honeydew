@@ -128,6 +128,52 @@ text += "};\n"
 Path(sys.argv[2]).write_text(text)
 PY
 
+# Package every upstream factory FXP as an actual native binary bank (not
+# approximate synthesis or parameter-only imitations). They are compiled as
+# one .rodata blob via .incbin: 641 patches without a 100 MB C++ literal array.
+python3 - "$SRC/resources/data/patches_factory" "$BUILD/generated" "$ROOT/src/content/presets/surge_xt_factory.tsv" <<'PY'
+from pathlib import Path
+import sys
+root, out, manifest = (Path(v) for v in sys.argv[1:])
+files = manifest.read_text().splitlines()
+actual = sorted(p.relative_to(root).as_posix() for p in root.rglob("*.fxp"))
+if actual != files or len(files) != 641:
+    raise SystemExit("Pinned official Surge XT factory preset manifest does not match")
+blob = bytearray()
+records = []
+for rel in files:
+    f = (root / rel).read_bytes()
+    if len(f) < 61 or f[:4] != b"CcnK" or f[8:12] != b"FPCh" or f[16:20] != b"cjs3":
+        raise SystemExit("Invalid official Surge FXP: " + rel)
+    size = int.from_bytes(f[56:60], "big")
+    if size < 100 or 60 + size > len(f):
+        raise SystemExit("Invalid original Surge FXP chunk: " + rel)
+    records.append((len(blob), size))
+    blob.extend(f[60:60+size])
+(out / "surge_factory_patches.bin").write_bytes(blob)
+arr = ",\n".join(f"    {{{offset}u, {size}u}}" for offset, size in records)
+asmfile = (out / "surge_factory_patches.bin").as_posix()
+head = f'''#pragma once
+#include <cstdint>
+struct HoneydewSurgeFactoryRecord {{ uint32_t offset; uint32_t size; }};
+static constexpr int honeydew_surge_factory_count = {len(records)};
+static constexpr HoneydewSurgeFactoryRecord honeydew_surge_factory[] = {{
+{arr}
+}};
+extern "C" const unsigned char honeydew_surge_factory_blob_start[];
+asm(R"surge(
+.pushsection .rodata
+.balign 16
+.global honeydew_surge_factory_blob_start
+honeydew_surge_factory_blob_start:
+.incbin "{asmfile}"
+.popsection
+)surge");
+'''
+(out / "honeydew_surge_factory_bank.h").write_text(head)
+print(f"Authentic Surge XT factory FXP bank: {len(files)} patches, {len(blob)} bytes")
+PY
+
 # Verify actual object architecture before letting Surge link the library.
 "$TOOLBIN/llvm-ar" p "$LUA_DST/bin/libluajit.a" lj_vm.o > "$LUA_DST/lj_vm-check.o"
 "$TOOLBIN/llvm-readelf" -h "$LUA_DST/lj_vm-check.o" | grep -F 'AArch64'

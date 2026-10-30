@@ -3,6 +3,7 @@
 // Build with the unmodified Surge XT source through bridge.cmake.
 #include "SurgeSynthesizer.h"
 #include "honeydew_surge_init_patch.h"
+#include "honeydew_surge_factory_bank.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -44,7 +45,8 @@ struct Instance {
         synth->time_data.ppqPos = 0.0;
         auto &registry = synth->storage.getPatch().param_ptr_by_oscname;
         for (int n = 0; n < kParameterCount; ++n) {
-            auto item = registry.find(kPaths[n]);
+            // Surge names every host parameter with the '/param/' OSC prefix.
+            auto item = registry.find(std::string("/param/") + kPaths[n]);
             param_ids[n] = item == registry.end() ? -1 : item->second->id;
         }
     }
@@ -110,6 +112,17 @@ HONEYDEW_EXPORT void honeydew_surge_native_param(void *handle, int which, float 
             instance.synth->setParameter01(parameter, std::clamp(value, 0.f, 1.f), true);
         }
     } catch (...) {}
+}
+// Called from the Honeydew app's instrument constructor, never from its
+// realtime callback. The pack is the 641 official factory FXP payloads.
+HONEYDEW_EXPORT int honeydew_surge_load_factory(void *handle, int preset) noexcept {
+    if (!handle || preset <= 0 || preset > honeydew_surge_factory_count) return 0;
+    try {
+        auto &s = *static_cast<Instance *>(handle)->synth;
+        const auto &entry = honeydew_surge_factory[preset - 1];
+        s.loadRaw(honeydew_surge_factory_blob_start + entry.offset, entry.size, false);
+        return 1;
+    } catch (...) { return 0; }
 }
 HONEYDEW_EXPORT void honeydew_surge_macro(void *handle, int which, float value) noexcept {
     if (!handle || which < 0 || which >= n_customcontrollers || !std::isfinite(value)) return;

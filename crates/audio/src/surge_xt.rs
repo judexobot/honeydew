@@ -12,6 +12,8 @@ use std::ffi::{c_char, c_void};
 use std::sync::OnceLock;
 
 const BLOCK: usize = 32;
+/// Kept in lockstep with the official pinned upstream factory catalog.
+pub const FACTORY_PRESET_COUNT: usize = 641;
 const RTLD_NOW: i32 = 2;
 const LIBRARY: &[u8] = b"libhoneydew_surge_xt.so\0";
 
@@ -31,6 +33,7 @@ type Cc = unsafe extern "C" fn(*mut c_void, u8, u8, u8);
 type Bend = unsafe extern "C" fn(*mut c_void, u8, i32);
 type Macro = unsafe extern "C" fn(*mut c_void, i32, f32);
 type NativeParam = unsafe extern "C" fn(*mut c_void, i32, f32);
+type FactoryPreset = unsafe extern "C" fn(*mut c_void, i32) -> i32;
 type Render = unsafe extern "C" fn(*mut c_void, *mut f32, *mut f32, f64, f64, i32) -> i32;
 
 #[derive(Clone, Copy)]
@@ -45,6 +48,7 @@ struct Api {
     bend: Bend,
     macro_value: Macro,
     native_param: NativeParam,
+    load_factory: FactoryPreset,
     render: Render,
 }
 
@@ -71,6 +75,7 @@ impl Api {
             bend: unsafe { symbol(handle, b"honeydew_surge_pitch_bend\0")? },
             macro_value: unsafe { symbol(handle, b"honeydew_surge_macro\0")? },
             native_param: unsafe { symbol(handle, b"honeydew_surge_native_param\0")? },
+            load_factory: unsafe { symbol(handle, b"honeydew_surge_load_factory\0")? },
             render: unsafe { symbol(handle, b"honeydew_surge_render32\0")? },
         }))();
         if result.is_none() {
@@ -88,6 +93,9 @@ pub struct SurgeXt {
     left: [f32; BLOCK],
     right: [f32; BLOCK],
     position: usize,
+    // Parameter defaults sent by Honeydew must not overwrite a freshly loaded
+    // original FXP. Later real UI gestures still reach the original DSP.
+    first_param: [bool; 33],
 }
 
 // The audio engine moves an Instrument between threads but never uses the same
@@ -96,15 +104,27 @@ unsafe impl Send for SurgeXt {}
 
 impl SurgeXt {
     pub fn new(sample_rate: f32) -> Result<Self, &'static str> {
+        Self::new_with_factory_preset(sample_rate, 0)
+    }
+
+    pub fn new_with_factory_preset(sample_rate: f32, preset: usize) -> Result<Self, &'static str> {
+        if preset > FACTORY_PRESET_COUNT {
+            return Err("Surge XT factory preset index out of range");
+        }
         let api = *API.get_or_init(|| unsafe { Api::load() })
             .as_ref().ok_or("original Surge XT native library is not installed")?;
         let instance = unsafe { (api.create)(sample_rate) };
         if instance.is_null() {
             return Err("Surge XT failed to initialize its original synthesizer engine");
         }
+        if preset != 0 && unsafe { (api.load_factory)(instance, preset as i32) } == 0 {
+            unsafe { (api.destroy)(instance) };
+            return Err("Original Surge XT factory preset could not be loaded");
+        }
         Ok(Self {
             api,
             instance,
+            first_param: [preset != 0; 33],
             left: [0.0; BLOCK],
             right: [0.0; BLOCK],
             position: BLOCK,
@@ -131,6 +151,12 @@ impl Instrument for SurgeXt {
     fn set_parameter(&mut self, index: usize, value: f32) {
         // p0 is Honeydew's own bypass. p1-p8 are Surge's genuine macros.
         if !value.is_finite() {
+            return;
+        }
+        if (1..=32).contains(&index) && self.first_param[index] {
+            // First refresh after new instrument construction is just the
+            // Honeydew registry defaults, not an edit of the factory patch.
+            self.first_param[index] = false;
             return;
         }
         if (1..=8).contains(&index) {
