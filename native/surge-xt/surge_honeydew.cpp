@@ -2,6 +2,7 @@
 // This is a C ABI around *Surge XT's original C++ synthesizer*, not a DSP reimplementation.
 // Build with the unmodified Surge XT source through bridge.cmake.
 #include "SurgeSynthesizer.h"
+#include "honeydew_surge_init_patch.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -37,6 +38,8 @@ struct Instance {
         synth = std::make_unique<SurgeSynthesizer>(
             &host, SurgeStorage::skipPatchLoadDataPathSentinel);
         synth->setSamplerate(rate);
+        // Decode the actual Surge XT factory Init Saw patch (FXP payload).
+        synth->loadRaw(honeydew_surge_init_data, sizeof(honeydew_surge_init_data), false);
         synth->time_data.tempo = 120.0;
         synth->time_data.ppqPos = 0.0;
         auto &registry = synth->storage.getPatch().param_ptr_by_oscname;
@@ -48,17 +51,19 @@ struct Instance {
 };
 } // namespace
 
+// Export a stable C ABI to Rust even when hiding Surge internal C++ symbols.
+#define HONEYDEW_EXPORT __attribute__((visibility("default")))
 extern "C" {
 // The caller owns the returned pointer. Construction may load Surge's internal resources,
 // so it must happen off the real-time callback.
-void *honeydew_surge_create(float sample_rate) noexcept {
+HONEYDEW_EXPORT void *honeydew_surge_create(float sample_rate) noexcept {
     if (!std::isfinite(sample_rate) || sample_rate < 8000 || sample_rate > 384000) return nullptr;
     try { return new Instance(sample_rate); } catch (...) { return nullptr; }
 }
-void honeydew_surge_destroy(void *handle) noexcept {
+HONEYDEW_EXPORT void honeydew_surge_destroy(void *handle) noexcept {
     delete static_cast<Instance *>(handle);
 }
-void honeydew_surge_note_on(void *handle, uint8_t channel, uint8_t key, uint8_t velocity) noexcept {
+HONEYDEW_EXPORT void honeydew_surge_note_on(void *handle, uint8_t channel, uint8_t key, uint8_t velocity) noexcept {
     if (!handle) return;
     try {
         static_cast<Instance *>(handle)->synth->playNote(
@@ -66,36 +71,36 @@ void honeydew_surge_note_on(void *handle, uint8_t channel, uint8_t key, uint8_t 
             static_cast<char>(velocity & 127), 0);
     } catch (...) {}
 }
-void honeydew_surge_note_off(void *handle, uint8_t channel, uint8_t key) noexcept {
+HONEYDEW_EXPORT void honeydew_surge_note_off(void *handle, uint8_t channel, uint8_t key) noexcept {
     if (!handle) return;
     try {
         static_cast<Instance *>(handle)->synth->releaseNote(
             static_cast<char>(channel & 15), static_cast<char>(key & 127), 0);
     } catch (...) {}
 }
-void honeydew_surge_panic(void *handle) noexcept {
+HONEYDEW_EXPORT void honeydew_surge_panic(void *handle) noexcept {
     if (!handle) return;
     try { static_cast<Instance *>(handle)->synth->allSoundOff(); } catch (...) {}
 }
-void honeydew_surge_all_notes_off(void *handle) noexcept {
+HONEYDEW_EXPORT void honeydew_surge_all_notes_off(void *handle) noexcept {
     if (!handle) return;
     try { static_cast<Instance *>(handle)->synth->allNotesOff(); } catch (...) {}
 }
-void honeydew_surge_cc(void *handle, uint8_t channel, uint8_t cc, uint8_t value) noexcept {
+HONEYDEW_EXPORT void honeydew_surge_cc(void *handle, uint8_t channel, uint8_t cc, uint8_t value) noexcept {
     if (!handle) return;
     try {
         static_cast<Instance *>(handle)->synth->channelController(
             static_cast<char>(channel & 15), cc & 127, value & 127);
     } catch (...) {}
 }
-void honeydew_surge_pitch_bend(void *handle, uint8_t channel, int bend14) noexcept {
+HONEYDEW_EXPORT void honeydew_surge_pitch_bend(void *handle, uint8_t channel, int bend14) noexcept {
     if (!handle) return;
     try {
         static_cast<Instance *>(handle)->synth->pitchBend(
             static_cast<char>(channel & 15), std::clamp(bend14, 0, 16383));
     } catch (...) {}
 }
-void honeydew_surge_native_param(void *handle, int which, float value) noexcept {
+HONEYDEW_EXPORT void honeydew_surge_native_param(void *handle, int which, float value) noexcept {
     if (!handle || which < 0 || which >= kParameterCount || !std::isfinite(value)) return;
     try {
         auto &instance = *static_cast<Instance *>(handle);
@@ -106,7 +111,7 @@ void honeydew_surge_native_param(void *handle, int which, float value) noexcept 
         }
     } catch (...) {}
 }
-void honeydew_surge_macro(void *handle, int which, float value) noexcept {
+HONEYDEW_EXPORT void honeydew_surge_macro(void *handle, int which, float value) noexcept {
     if (!handle || which < 0 || which >= n_customcontrollers || !std::isfinite(value)) return;
     try {
         static_cast<Instance *>(handle)->synth->setMacroParameter01(
@@ -115,7 +120,7 @@ void honeydew_surge_macro(void *handle, int which, float value) noexcept {
 }
 // Exactly Surge's native 32-frame process block (SURGE_COMPILE_BLOCK_SIZE=32).
 // No allocation, file I/O or synchronization is performed by this ABI layer.
-int honeydew_surge_render32(void *handle, float *left, float *right,
+HONEYDEW_EXPORT int honeydew_surge_render32(void *handle, float *left, float *right,
                             double ppq, double bpm, int playing) noexcept {
     if (!handle || !left || !right) return 0;
     try {
