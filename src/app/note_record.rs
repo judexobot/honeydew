@@ -8,9 +8,8 @@ use super::HoneydewApp;
 use super::auto_record::start;
 use super::tracks::LaneShift;
 use crate::song::{Channel, Clip, DrumGrid, Event, Lane, LaneKind, PPQ, Song};
-use crate::ui::clips::ClipRef;
 use crate::ui::preview;
-use crate::ui::views::{SongEdit, View};
+use crate::ui::views::SongEdit;
 
 /// The shortest recorded length, in beats.
 const MIN_BEATS: f64 = 0.01;
@@ -629,7 +628,7 @@ mod tests {
         }
         assert_eq!(song.channels[1].lanes.len(), 5);
         for (source, rec) in records.iter_mut().enumerate() {
-            let (channel, lane, _) = rec.clip(&song).unwrap();
+            let (channel, lane, _) = rec.clips(&song).into_iter().next().unwrap();
             assert_eq!(
                 song.channels[channel].lanes[lane].midi_channel(),
                 Some(source as u8)

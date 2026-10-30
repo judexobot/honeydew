@@ -762,7 +762,7 @@ impl HoneydewApp {
         let mut song = solo.or_else(|| self.note_record.without_take(&self.song));
         if !previewing {
             for record in &self.midi_records {
-                if let Some((channel, lane, id)) = record.clip(&self.song) {
+                for (channel, lane, id) in record.clips(&self.song) {
                     let copy = song.get_or_insert_with(|| self.song.clone());
                     copy.channels[channel].lanes[lane]
                         .clips
@@ -1706,8 +1706,8 @@ impl HoneydewApp {
             let channel = channels.iter().position(|c| c.id == id)?;
             Some((channel, lane, clip))
         });
-        let clips = (self.note_record.clip(&self.song).into_iter())
-            .chain(self.midi_records.iter().filter_map(|r| r.clip(&self.song)))
+        let clips = self.note_record.clips(&self.song).into_iter()
+            .chain(self.midi_records.iter().flat_map(|r| r.clips(&self.song)))
             .chain(auto);
         let mut takes: Vec<LiveTake> = clips
             .filter_map(|(channel, lane, id)| {

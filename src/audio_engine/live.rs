@@ -16,7 +16,7 @@ const PLAIN_CAPACITY: usize = 256;
 
 /// A channel's live keys: its note effects in real time, and per instrument the note effects above it.
 pub(super) struct Live {
-    chain: LiveNoteChain,
+    pub(super) chain: LiveNoteChain,
     midi: Vec<LiveNoteChain>,
     stages: Vec<usize>,
     /// Its note effects: a note past them all is what its MIDI sends forward.
@@ -84,6 +84,7 @@ pub(super) fn build(
     } else {
         0
     };
+    let count = effects.len();
     let midi = (0..sources)
         .map(|_| make_chain(effects.clone()))
         .collect::<Result<Vec<_>, _>>()?;

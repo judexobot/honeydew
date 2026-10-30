@@ -149,7 +149,9 @@ impl HoneydewApp {
             song_links(&self.song)
         };
         let mut linked = false;
-        for msg in messages.iter().filter_map(|m| MidiMsg::parse(m)) {
+        for (device, bytes) in &messages {
+            let Some(msg) = MidiMsg::parse(bytes) else { continue };
+            let targets = self.midi_targets(device, msg.channel());
             let mapped = self
                 .song
                 .channels
@@ -165,8 +167,9 @@ impl HoneydewApp {
                     .router
                     .route_midi(msg, self.selected_channel, &links)
             } else {
-                self.midi.router.route(msg, self.selected_channel, &links)
+                self.midi.router.route(device, msg, &targets, &links)
             };
+            self.record_cc(msg, &targets, &outs, tick);
             // The learned key plays after its edit rebuilds the engine, so it sounds with its pad.
             outs.sort_by_key(|out| !matches!(out, Out::LearnedNote(_)));
             for out in outs {

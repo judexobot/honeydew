@@ -302,7 +302,7 @@ impl Mixer {
         }
     }
 
-    fn route_channel<B: MixBuffer>(&self, buffers: &mut [B], index: usize) {
+    pub fn route_channel<B: MixBuffer>(&self, buffers: &mut [B], index: usize) {
         let (left, right) = buffers[index].stereo();
         let channel = &self.channels[index];
         let gain = level_gain(channel.level);
