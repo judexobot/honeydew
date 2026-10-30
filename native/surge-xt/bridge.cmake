@@ -10,7 +10,10 @@ endif()
 add_library(honeydew_surge_xt SHARED
   "${HONEYDEW_SURGE_DIR}/native/surge-xt/surge_honeydew.cpp"
 )
-target_include_directories(honeydew_surge_xt PRIVATE "${SURGE_SOURCE_DIR}/src/common")
+target_include_directories(honeydew_surge_xt PRIVATE
+  "${SURGE_SOURCE_DIR}/src/common"
+  "${CMAKE_BINARY_DIR}/generated"
+)
 target_link_libraries(honeydew_surge_xt PRIVATE surge-common)
 target_compile_features(honeydew_surge_xt PRIVATE cxx_std_20)
 set_target_properties(honeydew_surge_xt PROPERTIES
