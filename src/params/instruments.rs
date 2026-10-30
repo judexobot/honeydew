@@ -1798,5 +1798,5 @@ pub static MODULES: &[ModuleSpec] = &[
     ),
     #[cfg(all(target_os = "android", feature = "surge-xt"))]
     ModuleSpec::instrument(57, "Surge XT", "Surge XT", SURGE_XT,
-        &["SCENE A", "OSC", "MIX", "FILTER", "AMP", "FENV", "LFO", "MACROS", "BANK", "MIDI"]),
+        &[]),
 ];
