@@ -145,9 +145,6 @@ pub fn ui_height(type_id: u16) -> Option<f32> {
         52 => 8.5,
         54 => 14.0,
         55 => 16.0,
-        // The original Surge XT engine has its own tabbed Android instrument panel.
-        #[cfg(all(target_os = "android", feature = "surge-xt"))]
-        57 => 11.0,
         // Effects and note effects.
         3 | 7 | 26 | 30 | 51 => 10.0,
         4 | 35 | 36 | 43 | 46 => 9.0,
