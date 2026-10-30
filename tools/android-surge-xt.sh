@@ -23,6 +23,40 @@ git -C "$SRC" fetch --depth=1 origin "$REV"
 git -C "$SRC" checkout --detach "$REV"
 git -C "$SRC" submodule update --init --recursive --jobs 4
 
+# Android Bionic has no glibc execinfo backtrace()/backtrace_symbols().
+# This is sst-plugininfra's optional human-readable diagnostics routine;
+# retaining the original Surge synthesis source and replacing only the
+# unavailable diagnostic makes the core compatible with Android NDK.
+python3 - "$SRC/libs/sst/sst-plugininfra/src/misc_linux.cpp" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text()
+old = '''std::string stackTraceToString(int depth)
+{
+    void *callstack[128];'''
+new = '''std::string stackTraceToString(int depth)
+{
+#if defined(__ANDROID__)
+    (void)depth;
+    return "Native stack trace unavailable with Android Bionic";
+#else
+    void *callstack[128];'''
+if old not in s:
+    raise SystemExit("Expected pinned sst-plugininfra stack trace source changed")
+s = s.replace(old, new, 1)
+old_end = '''    free(strs);
+    return oss.str();
+}'''
+new_end = '''    free(strs);
+    return oss.str();
+#endif
+}'''
+if old_end not in s:
+    raise SystemExit("Expected pinned stack trace function ending changed")
+p.write_text(s.replace(old_end, new_end, 1))
+PY
+
 # The upstream files remain a verified Git checkout. Only its *build file*
 # gets a local include for the Honeydew-specific linkage target.
 python3 - "$SRC/CMakeLists.txt" "$ROOT/native/surge-xt/bridge.cmake" <<'PY'
