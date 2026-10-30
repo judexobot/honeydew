@@ -183,6 +183,7 @@ const SECTIONS: [(Option<&str>, &[Entry]); 7] = [
         Some("FILTER"),
         &[
             M(40),
+            M(honeydew_audio::dynamic_eq::DYNAMIC_EQ),
             M(3),
             lemon(crate::plugins::builtin::LEMON_EQ, false),
             M(9),
@@ -199,6 +200,7 @@ const SECTIONS: [(Option<&str>, &[Entry]); 7] = [
             M(26),
             M(11),
             M(13),
+            M(honeydew_audio::modulator::MODULATOR),
             M(4),
             M(14),
             M(25),
