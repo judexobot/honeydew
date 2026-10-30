@@ -61,13 +61,16 @@ const THREE_OSC: u16 = 39;
 
 /// The instrument types whose presets are indexed, each with its preset folder's name in the Original Content's
 /// `Synth Presets2` (`None`: the DW Sampler, whose programs are in `DirectWave Samples`).
-pub const SOURCES: [u16; 6] = [
+pub const SOURCES: &[u16] = &[
     DW_SAMPLER,
     MINISYNTH,
     GMSYNTH,
     TRANSISTOR_BASS,
     SUPERSAW,
     THREE_OSC,
+    // Preset-only original Surge XT is an Android feature, not a GUI editor.
+    #[cfg(all(target_os = "android", feature = "surge-xt"))]
+    57,
 ];
 
 /// A category: its folder row (below [`ROOT`]) and its presets, by their real paths, in order.
