@@ -4,6 +4,9 @@ version = "0.4.2"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
+[features]
+surge-xt = ["honeydew-audio/surge-xt"]
+
 [workspace]
 # The root package is a member as the workspace root. Listing it as "." would make every path below it an explicit
 # member and defeat `exclude` (cargo matches members by path prefix).
