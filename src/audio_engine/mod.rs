@@ -6,7 +6,9 @@ mod generators;
 mod input;
 mod live;
 mod merge;
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+mod midi_sends;
+mod modulation;
+#[cfg(desktop)]
 mod parallel;
 mod prepare;
 mod preview;
@@ -24,7 +26,7 @@ use std::sync::Arc;
 use crate::audio_bridge::{SongAudioBridge, SongAudioError};
 use crate::sample_cache::SampleCache;
 use crate::settings::Settings;
-use crate::song::{PPQ, Song};
+use crate::song::{PPQ, Song, TEMPO_PARAM, automated_tempo, tempo_value};
 use honeydew_audio::analysis;
 use honeydew_audio::automation::AutomationTarget;
 use honeydew_audio::device::{AudioRenderer, ModuleKey, PingReport};
@@ -38,7 +40,7 @@ use honeydew_audio::sample::SampleData;
 use honeydew_audio::{MeterSnapshot, ProcessContext};
 use input::Monitor;
 use prepare::{Action, KIT, ParamTimeline, ScheduledAction, beat_frame};
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+#[cfg(desktop)]
 use rayon::prelude::*;
 
 pub use slicer::{auto_clip as slicer_auto_clip, settle_first_notes};
@@ -48,11 +50,11 @@ const BLOCK_FRAMES: usize = 1024;
 /// Prepare the desktop worker pool off the audio callback. Other platforms
 /// retain the sequential path even if an old preference is on.
 pub(crate) fn prepare_multi_core() -> bool {
-    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    #[cfg(desktop)]
     {
         parallel::prepare()
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    #[cfg(not(desktop))]
     {
         false
     }
@@ -143,6 +145,7 @@ pub struct SongAudioEngine {
     kit_sustained: Vec<[u8; 128]>,
     /// The channel ids and the solo links of the song's sends and pad targets.
     routing: routing::Routing,
+    midi_sends: midi_sends::MidiSends,
     /// What the sequencer holds, as the actions played so far left it ([`hold`]): per channel, instrument (as in
     /// `instruments`, then the pads' notes) and key, the note-ons not yet matched by a note-off; per channel and pad,
     /// the hits not yet released; per channel, the keys at its input. A re-sync releases what no note covers.
@@ -188,9 +191,11 @@ pub struct SongAudioEngine {
     playing: bool,
     /// The click voice: the metronome's beats and the count-in's.
     metronome: Metronome,
-    /// The metronome clicks on the song's beats while the transport rolls. It follows REC's arm (`App::auto_record`,
-    /// its only sender), so it also tells a recording, which does not wrap at the song end ([`Self::wrap_range`]).
-    metronome_on: bool,
+    /// REC's arm (`App::auto_record`, its only sender): a recording, which does not wrap at the song end
+    /// ([`Self::wrap_range`]), and whose beats click while the transport rolls if [`Self::armed_clicks`].
+    armed: bool,
+    /// The `Metronome when recording` setting: REC's arm clicks the beats.
+    armed_clicks: bool,
     /// The metronome flag (the tempo dialog's toggle): the beats click while it is on too, REC armed or not. It never
     /// stops the song-end wrap. An export's engine never gets it.
     metronome_flag: bool,
@@ -221,6 +226,8 @@ pub struct SongAudioEngine {
     silence: Vec<usize>,
     /// The pickers' sample preview while it plays ([`AudioRenderer::preview`]).
     preview: Option<preview::Preview>,
+    /// The Modulators' targets ([`modulation`]).
+    modulation: modulation::Modulations,
 }
 
 impl SongAudioEngine {
@@ -277,6 +284,7 @@ impl SongAudioEngine {
                 .map_err(|error| EngineError::Song(SongAudioError::Playback(error)))?;
         }
         let (mixes, routing) = routing::build(song);
+        let midi_sends = midi_sends::build(song);
         let mixer = Mixer::new(&mixes).map_err(EngineError::Mixer)?;
         let maximum: Vec<_> = bridge
             .audio
@@ -291,6 +299,7 @@ impl SongAudioEngine {
         let mut clips = Vec::with_capacity(song.channels.len());
         let mut lives = Vec::with_capacity(song.channels.len());
         let mut meter_keys = Vec::new();
+        let wires = modulation::wired(song);
         // The sends' Enable and Level, as channel params 0x1000 / 0x2000 + the target's id.
         let mut initial: Vec<_> = (mixes.iter().enumerate())
             .flat_map(|(channel, mix)| mix.sends.iter().map(move |send| (channel, send)))
@@ -331,13 +340,20 @@ impl SongAudioEngine {
                 tempo_bpm,
                 samples,
             )?);
-            // A CC lane's target rests at 0 before its first point: the song stores no value for it.
-            for target in channel.lanes.iter().filter_map(|lane| lane.target) {
+            // A CC lane's or Modulator's target rests at 0 before its first point: the song stores no value for it. The
+            // master's tempo rests at the song's.
+            let modulated = wires.iter().filter(|w| w.channel == channel_index);
+            let lanes = channel.lanes.iter().filter_map(|lane| lane.target);
+            for target in lanes.chain(modulated.map(|w| w.target)) {
                 let index = strip_param(0, target.param);
                 let key = (channel_index, 0, index);
                 if target.instance_id == 0 && !initial.iter().any(|&(c, i, p, _)| (c, i, p) == key)
                 {
-                    initial.push((channel_index, 0, index, 0.0));
+                    let rest = match song.is_tempo(channel_index, target) {
+                        true => tempo_value(song.tempo_bpm),
+                        false => 0.0,
+                    };
+                    initial.push((channel_index, 0, index, rest));
                 }
             }
             let mut modules = generators::build(
@@ -386,6 +402,7 @@ impl SongAudioEngine {
                 song,
                 channel_index,
                 &modules,
+                !midi_sends.targets[channel_index].is_empty(),
                 sample_rate,
                 tempo_bpm,
             )?);
@@ -398,6 +415,7 @@ impl SongAudioEngine {
             song,
             &bridge,
             &instruments,
+            &midi_sends,
             sample_rate,
             tempo_bpm,
             &mut traces,
@@ -439,6 +457,9 @@ impl SongAudioEngine {
             .map(|kit| vec![0; kit.as_ref().map_or(0, |kit| kit.sampler.pads())])
             .collect();
         let settings = settings::saved(song);
+        let modulation = modulation::Modulations::new(&wires, &initial, |channel, id| {
+            bridge.audio.effect(channel, id).is_some()
+        });
         let checkpoints = Checkpoints::new(&actions, &instruments, &held, &held_pads);
         for (channel, rows) in instruments.iter_mut().enumerate() {
             let maximum = compensation.maximum_input_latency(channel) + maximum[channel];
@@ -489,6 +510,7 @@ impl SongAudioEngine {
             sustained,
             kit_sustained: vec![[0; 128]; count],
             routing,
+            midi_sends,
             cover: held.clone(),
             cover_pads: held_pads.clone(),
             cover_keys: vec![0; count],
@@ -513,7 +535,8 @@ impl SongAudioEngine {
             song_beats: Some(crate::render::song_length_beats(song)),
             playing: false,
             metronome: Metronome::new(sample_rate),
-            metronome_on: false,
+            armed: false,
+            armed_clicks: true,
             metronome_flag: false,
             metronome_level: metronome::level(Settings::default().metronome_level),
             bar_beats: song.time_sig.bar_beats(),
@@ -529,6 +552,7 @@ impl SongAudioEngine {
             resync: false,
             silence: Vec::new(),
             preview: None,
+            modulation,
         };
         engine.sync_mixer_controls();
         engine.apply_settings();
@@ -608,22 +632,53 @@ impl SongAudioEngine {
         }
         if let Some(at) = position(&self.initial, (channel, instance_id, index)) {
             self.applied[at] = value;
+            self.modulation.based(at);
+        }
+        if !self.send_param(channel, instance_id, index, value) || index < 0 {
+            return;
+        }
+        // A param set may move another of its effect (Tremolo, ID 46: Max below Min lowers Min): `applied` takes what
+        // the effect holds now, so a re-sync or an edit still sets the other back. A modulated one holds its base there.
+        if let Some(effect) = self.audio.effect(channel, instance_id) {
+            let key = (channel, instance_id, 0);
+            let start = (self.initial).partition_point(|&(c, i, p, _)| (c, i, p) < key);
+            for at in start..self.initial.len() {
+                let (c, i, p, _) = self.initial[at];
+                match effect.parameter(p as usize) {
+                    Some(held) if (c, i) == (channel, instance_id) => {
+                        if !self.modulation.holds(at) {
+                            self.applied[at] = held;
+                        }
+                    }
+                    _ => break,
+                }
+            }
+        }
+    }
+
+    /// Sets param `index` of `instance_id` on `channel` to `value` where it acts, leaving `applied` as it is: what
+    /// [`Self::apply_param`] and a Modulator ([`Self::modulate`]) set. Whether it set an effect's param.
+    fn send_param(&mut self, channel: usize, instance_id: i32, index: i32, value: f32) -> bool {
+        // The master's tempo automation: the value is a tempo (`song::automated_tempo`), played as a live tempo change.
+        if (channel, instance_id, index) == (0, 0, TEMPO_PARAM) {
+            self.set_tempo(automated_tempo(value) as f32);
+            return false;
         }
         if instance_id == 0
             && let Some((target, level)) = self.routing.send(index)
         {
             let _ = self.mixer.set_send(channel, target, level, value);
-            return;
+            return false;
         }
         if instance_id < 0 {
             if let Some(Some(kit)) = self.kits.get_mut(channel) {
                 kit.set_slot_param(instance_id.unsigned_abs(), index, value);
             }
-            return;
+            return false;
         }
         if let Some(module) = self.instrument(channel, instance_id) {
             module.set_parameter(index, value);
-            return;
+            return false;
         }
         let target = AutomationTarget {
             channel,
@@ -631,31 +686,21 @@ impl SongAudioEngine {
             parameter_index: index,
         };
         if self.audio.set_target(target, value).is_err() {
-            return;
+            return false;
         }
         if instance_id != 0 {
-            // A param set may move another of its effect (Tremolo, ID 46: Max below Min lowers Min): `applied` takes
-            // what the effect holds now, so a re-sync or an edit still sets the other back.
-            if let (Some(effect), true) = (self.audio.effect(channel, instance_id), index >= 0) {
-                let key = (channel, instance_id, 0);
-                let start = (self.initial).partition_point(|&(c, i, p, _)| (c, i, p) < key);
-                for at in start..self.initial.len() {
-                    let (c, i, p, _) = self.initial[at];
-                    match effect.parameter(p as usize) {
-                        Some(held) if (c, i) == (channel, instance_id) => self.applied[at] = held,
-                        _ => break,
-                    }
-                }
-            }
-            return;
+            return true;
         }
         match usize::try_from(index) {
             Ok(control @ 0..=3) => {
                 self.channel_controls[channel][control] = value;
                 self.sync_mixer_controls();
             }
-            // The engine holds note-offs for the sustain pedal; instruments never see CC #64.
+            // The engine holds note-offs for the sustain pedal; only an instrument that takes it itself sees CC #64.
             Ok(SUSTAIN_PEDAL) => {
+                for instrument in self.instruments_of(channel).filter(|i| i.takes_pedal()) {
+                    instrument.set_controller(SUSTAIN_PEDAL, value);
+                }
                 if value <= 0.5 {
                     self.lift_pedal(channel);
                 }
@@ -672,6 +717,7 @@ impl SongAudioEngine {
             }
             Err(_) => {}
         }
+        false
     }
 
     /// Mute and Solo are on above 0.5: a channel is out of the mix while its Mute is on, or while another channel's
@@ -975,6 +1021,7 @@ impl SongAudioEngine {
             }
             return true;
         }
+        // As `Mixer::mix`, each channel's rack output keying the channels it keys before its strip.
         let audio = self.audio.channels_mut();
         let instruments = &mut self.instruments;
         if self.compensation.enabled() {
@@ -1104,12 +1151,17 @@ impl AudioRenderer for SongAudioEngine {
         if let Some(at) = position(&self.initial, (channel, instance_id, index)) {
             self.initial[at].3 = value;
         }
+        if instance_id == 0 {
+            self.forward_param(channel, index, value, true);
+        }
     }
 
     /// MIDI's Pitch Bend or channel pressure: no initial value (the song holds none), so a re-sync and Stop put the
     /// saved one back. The on-screen pitch wheel writes the song, and comes as [`Self::set_param`].
     fn set_live_param(&mut self, channel: usize, index: i32, value: f32) {
-        self.apply_param(channel, 0, strip_param(0, index), value);
+        let index = strip_param(0, index);
+        self.apply_param(channel, 0, index, value);
+        self.forward_param(channel, index, value, false);
     }
 
     /// Play start: the pickers' sample preview stops; every channel gets a full all-notes-off ([`Self::release_notes`]:
@@ -1169,6 +1221,7 @@ impl AudioRenderer for SongAudioEngine {
         self.action_index = self.actions.partition_point(|event| event.frame < frame);
         if self.rolling() {
             self.resync();
+            self.release_own_pedals(0..self.instruments.len());
         }
     }
 
@@ -1309,8 +1362,8 @@ impl AudioRenderer for SongAudioEngine {
     }
 
     /// `on` always applies; a level that is not finite keeps the last one.
-    fn set_metronome(&mut self, on: bool, level: f32) {
-        self.metronome_on = on;
+    fn set_metronome(&mut self, on: bool, click: bool, level: f32) {
+        (self.armed, self.armed_clicks) = (on, click);
         if level.is_finite() {
             self.metronome_level = metronome::level(level.clamp(0.0, 1.0));
         }
@@ -1391,10 +1444,7 @@ impl AudioRenderer for SongAudioEngine {
     }
 }
 
-#[cfg(all(
-    test,
-    any(target_os = "linux", target_os = "macos", target_os = "windows")
-))]
+#[cfg(all(test, desktop))]
 mod parallel_tests {
     use super::*;
     use crate::song::{ChannelKind, SendState, Song, SynthKind};
@@ -1417,6 +1467,11 @@ mod parallel_tests {
             });
         }
         song.channels[1].rack.add(20); // A bus effect runs after its sources.
+        // A Compressor on channel 2 keyed from channel 4, which runs first.
+        let (id, key) = (song.channels[2].rack.add(8), song.channels[4].id);
+        let compressor = song.channels[2].rack.get_mut(id).unwrap();
+        (compressor.params[1], compressor.params[2]) = (0.0, 1.0);
+        compressor.sidechain = Some(key);
         let mut serial = SongAudioEngine::new(&song, 48_000.0).unwrap();
         let mut parallel = SongAudioEngine::new(&song, 48_000.0).unwrap();
         assert!(parallel.mixer.has_parallel_stage());
@@ -1451,7 +1506,7 @@ impl SongAudioEngine {
     /// Where a rolling transport wraps: the loop, else [0, song end), but for a recording (with no song loop it does
     /// not wrap at the song end) and an export.
     fn wrap_range(&self) -> Option<(u64, u64)> {
-        let beats = self.song_beats.filter(|_| !self.metronome_on);
+        let beats = self.song_beats.filter(|_| !self.armed);
         let end = beats.and_then(|beats| beat_frame(beats, self.sample_rate, self.built_bpm).ok());
         let end = end.filter(|end| *end > 0);
         self.loop_frames.or(end.map(|end| (0, end)))
@@ -1566,7 +1621,7 @@ impl SongAudioEngine {
                 self.click_beat(k);
             }
             next.0 = Some(self.beat_from(done + 1, self.tempo_bpm).1 - done);
-        } else if (self.metronome_on || self.metronome_flag) && self.playing {
+        } else if (self.armed && self.armed_clicks || self.metronome_flag) && self.playing {
             // The beat the transport is on or last passed clicks as the transport reaches it, which lands within an
             // output frame of it (its frame is a stop); at a live tempo the transport's frames go by faster or slower.
             let (mut k, mut start) = self.beat_from(self.frame, self.built_bpm);
@@ -1606,6 +1661,7 @@ impl SongAudioEngine {
             clips.sampler.all_notes_off();
         }
         self.clear_sustained();
+        self.release_own_pedals(0..self.instruments.len());
         // Every key goes dark, live and sequenced, and nothing is held any more: the cover of no events.
         self.sounding.fill(0);
         self.clear_live(queued);
@@ -1627,6 +1683,7 @@ impl SongAudioEngine {
         for (_, module) in &mut self.instruments[channel] {
             module.instrument.all_notes_off();
         }
+        self.release_own_pedals(channel..channel + 1);
         if let Some(kit) = &mut self.kits[channel] {
             kit.sampler.all_notes_off();
         }
@@ -1920,6 +1977,7 @@ impl SongAudioEngine {
         }
         (self.frame, self.phase, self.clicked_beat) = (start, 0.0, None);
         self.resync();
+        self.release_own_pedals(0..self.instruments.len());
         if over < self.speed() {
             let at = start as f64 + over;
             (self.frame, self.phase) = (at as u64, at.fract());
@@ -1928,8 +1986,9 @@ impl SongAudioEngine {
 
     /// Every note-off of `channel`, sequenced or live, goes through here: to its instrument `instance_id` or its pad
     /// sampler ([`KIT`]), or to all of them for `None` (a live key). While its sustain pedal is down (CC #64 > 0.5) the
-    /// note-off is held, counted per instrument (and for the pads) and key, until the pedal lifts. An instrument
-    /// outside whose key range the key is, or that is learning one, never gets it.
+    /// note-off is held, counted per instrument (and for the pads) and key, until the pedal lifts; an instrument that
+    /// takes the pedal itself ([`Instrument::takes_pedal`], a plugin) gets it at once. An instrument outside whose key
+    /// range the key is, or that is learning one, never gets it.
     fn key_up(&mut self, channel: usize, instance_id: Option<i32>, key: u8) {
         let pedal = self.audio.channel_parameter(channel, SUSTAIN_PEDAL);
         let pedal = pedal.is_some_and(|pedal| pedal > 0.5);
@@ -1955,8 +2014,26 @@ impl SongAudioEngine {
                 continue;
             }
             match held.get_mut(usize::from(key)) {
-                Some(count) if pedal => *count = count.saturating_add(1),
+                Some(count) if pedal && !module.instrument.takes_pedal() => {
+                    *count = count.saturating_add(1);
+                }
                 _ => module.instrument.note_off(key),
+            }
+        }
+    }
+
+    /// Each instrument of `channels` that takes the sustain pedal itself, while the pedal is down, gets it lifted and put
+    /// back as it stands (CC #64 0, then its value): what it sustains is released, as all notes off forgets the
+    /// note-offs the engine holds for the others (Stop, `AllNotesOff`) and a seek and the loop wrap force theirs.
+    fn release_own_pedals(&mut self, channels: std::ops::Range<usize>) {
+        for channel in channels {
+            let pedal = (self.audio.channel_parameter(channel, SUSTAIN_PEDAL)).unwrap_or(0.0);
+            if pedal <= 0.0 {
+                continue;
+            }
+            for instrument in self.instruments_of(channel).filter(|i| i.takes_pedal()) {
+                instrument.set_controller(SUSTAIN_PEDAL, 0.0);
+                instrument.set_controller(SUSTAIN_PEDAL, pedal);
             }
         }
     }
@@ -2225,6 +2302,62 @@ mod tests {
         assert_eq!(engine.cover_replays, 1);
     }
 
+    /// Issue #33: an instrument that takes the sustain pedal itself (a plugin) gets CC #64 as it moves, a half-pedal
+    /// value too, and its note-offs at once; a built-in one still has its note-offs held until the pedal lifts. Stop
+    /// lifts the plugin's pedal (CC #64 0) and puts it back as it stands, so nothing it sustains sticks.
+    #[test]
+    fn a_plugin_takes_the_sustain_pedal_itself() {
+        use std::sync::Mutex;
+
+        type Log = Arc<Mutex<Vec<(&'static str, f32)>>>;
+        /// Records its note-offs and its CC #64s (param 71); takes the pedal itself when its flag is set.
+        struct Pedal(bool, Log);
+        impl Instrument for Pedal {
+            fn set_parameter(&mut self, _: usize, _: f32) {}
+            fn note_on(&mut self, _: u8, _: f32, _: f32) {}
+            fn note_off(&mut self, key: u8) {
+                self.1.lock().unwrap().push(("off", f32::from(key)));
+            }
+            fn all_notes_off(&mut self) {}
+            fn reset(&mut self) {}
+            fn process(&mut self, _: &mut [f32], _: &mut [f32], _: ProcessContext) {}
+            fn set_controller(&mut self, index: usize, value: f32) {
+                if index == 71 {
+                    self.1.lock().unwrap().push(("cc64", value));
+                }
+            }
+            fn takes_pedal(&self) -> bool {
+                self.0
+            }
+        }
+        let mut song = Song::default();
+        song.add_channel(ChannelKind::Synth(SynthKind::MiniSynth));
+        song.add_channel(ChannelKind::Synth(SynthKind::MiniSynth));
+        let mut engine = SongAudioEngine::new(&song, 48_000.0).unwrap();
+        let (plugin, builtin): (Log, Log) = Default::default();
+        engine.instruments[1][0].1.instrument = Box::new(Pedal(true, plugin.clone()));
+        engine.instruments[2][0].1.instrument = Box::new(Pedal(false, builtin.clone()));
+        let take = |log: &Log| std::mem::take(&mut *log.lock().unwrap());
+        engine.play();
+        for channel in [1, 2] {
+            engine.set_param(channel, 0, 71, 0.6);
+            engine.note_on(channel, 60, 1.0);
+            engine.note_off(channel, 60);
+        }
+        engine.render(&mut vec![0.0; 256 * 2], 2);
+        assert_eq!(take(&plugin), [("cc64", 0.6), ("off", 60.0)]);
+        assert_eq!(take(&builtin), []);
+        for channel in [1, 2] {
+            engine.set_param(channel, 0, 71, 0.0);
+        }
+        assert_eq!(take(&plugin), [("cc64", 0.0)]);
+        assert_eq!(take(&builtin), [("off", 60.0)]);
+        engine.set_param(1, 0, 71, 1.0);
+        take(&plugin);
+        engine.stop();
+        assert_eq!(take(&plugin), [("cc64", 0.0), ("cc64", 1.0)]);
+    }
+
     /// A re-sync's cover replays at most one checkpoint span of actions, and is what replaying every action up to the
     /// playhead would give. 5 000 notes are 20 000 actions (each note's key and instrument on and off): four
     /// checkpoints. A long low note holds through them all.
@@ -2310,7 +2443,7 @@ mod tests {
     fn the_metronome_clicks_on_each_beat_at_a_live_tempo() {
         for bpm in [90.0, 180.0, 250.0] {
             let mut engine = SongAudioEngine::new(&Song::default(), 48_000.0).unwrap();
-            engine.set_metronome(true, 1.0);
+            engine.set_metronome(true, true, 1.0);
             engine.set_tempo(bpm);
             engine.play();
             let per_beat = 48_000.0 * 60.0 / f64::from(bpm);
@@ -2523,7 +2656,7 @@ mod tests {
     /// An engine for `song` with the metronome on at full level.
     fn clicking(song: &Song) -> SongAudioEngine {
         let mut engine = SongAudioEngine::new(song, 48_000.0).unwrap();
-        engine.set_metronome(true, 1.0);
+        engine.set_metronome(true, true, 1.0);
         engine
     }
 

@@ -51,7 +51,12 @@
 //! - Sound: touching or tapping a note is silent. A new note sounds at velocity 1 for 150 ms; while a selection one key
 //!   tall is dragged, each key change stops the old key and plays the new one at velocity 0.7, until the release
 //!   ([`PianoRollAction::Note`]).
-//! - The snap button: a tap toggles snap, a long press or a right click opens the snap menu.
+//! - The snap button: a tap toggles snap, a long press or a right click opens the snap menu: the time modes under
+//!   `Time`, beside them (a Honeydew addition, GitHub issue #32) the graph lane's value snap for its shown item under
+//!   `Vel` or `Pan` ([`crate::ui::automation::value::snap_items`]): `Off` (the default), `1 %` … `25 %`, then Vel's
+//!   `MIDI` velocities or Pan's `L/C/R`. Each item keeps its own, an app setting. While it is on, the grid's lines show
+//!   in the lane in place of its guides, and a paint lands on it ([`Prop::landed`]); a lane drag shows its value
+//!   beside the finger.
 //!
 //! A move or a handle's drag changes nothing until the pointer has left the calm zone, so a long press never nudges a
 //! note onto the grid.
@@ -84,9 +89,11 @@
 //! - `Transpose by...` turns the popup into a one-cell offset display: a vertical drag anywhere picks the offset (half
 //!   a U a semitone, up is up, kept to what keeps every note in the key range) and its release applies it; a tap,
 //!   Escape or a click outside cancel.
-//! - `Humanize` runs [`notes::humanize_selected`] on the selected notes only, from a generator seeded per use from the
-//!   std hasher's random keys and egui's clock (OS entropy natively; on the web the keys are fixed, so the clock varies
-//!   it).
+//! - `Humanize` opens the Humanize panel ([`humanize`], issue #29: it used to have no dialog), its seed
+//!   drawn per use from the std hasher's random keys and egui's clock (OS entropy natively; on the web the keys are
+//!   fixed, so the clock varies it). While it is open the roll draws its preview in place of the notes, on the grid
+//!   and in the graph lane, and hides the floating row; its `Apply` writes the preview, re-sorted, deselects and
+//!   re-syncs.
 //!
 //! The ruler takes the shared gestures ([`RangeSelect`]) in content ticks on the snap grid (whole ticks with snap off):
 //! a tap sets the song's playhead, and the range is the song's play loop, content tick 0 being song tick
@@ -97,17 +104,27 @@
 //! the loop's end], the line and the disc following it. The region items act on every note of the clip ([`region`]);
 //! `Snap to Scale` and `Guess Scale...` on the notes that start in the range. A region edit is one final edit and drops
 //! the note selection.
+//!
+//! A Honeydew addition (issue #26): on a take being recorded ([`RollOptions::recording`]; the app opens the take's clip
+//! in a roll open on its channel) the roll shows the clip as it records ([`crate::app::note_record::live`]: each held
+//! note from its note-on to the playhead, the clip grown as the take will leave it) and edits nothing. Its playhead
+//! runs on from the clip's start, unfolded, as the take grows to it; with `Continuous scrolling during playback` on the
+//! view keeps it a quarter in, and with it off the view turns a page whenever it leaves the view.
 
+mod humanize;
 pub(crate) mod notes;
 
 use std::hash::{BuildHasher, RandomState};
 
 use eframe::egui::{self, Align2, Color32, Id, Pos2, Rangef, Rect, Sense, Vec2, pos2, vec2};
 
+use crate::params::DRUM_SLOT_PARAMS;
 use crate::song::scales::{CHROMATIC, SCALE_MASKS, scale_to_stored};
 use crate::song::{Clip, Event, LaneKind, PPQ, Song, TimeSig};
 use crate::theme::{Rgba, channel_color};
 use crate::ui::automation::geom;
+use crate::ui::automation::value::{self, Pick, ValueGrid, ValueSnap};
+use crate::ui::automation::{GRID_ALPHA, GRID_GAP, value_label};
 use crate::ui::clips::{self, Part, TimeAxis};
 use crate::ui::dialog;
 use crate::ui::drum_grid::edit::{MARK_GAP, mark_spacing, marks};
@@ -234,6 +251,8 @@ pub struct RollOptions {
     /// channel's input (song playback, previews), bit k for key k: their rows are lit (grid background step 4), with
     /// the roll's own sounds.
     pub sounding: u128,
+    /// The roll's clip is a take being recorded: it shows live and read-only (module docs; Honeydew's own).
+    pub recording: bool,
 }
 
 /// The piano roll of one clip: which clip, the snap setting, and view and gesture state.
@@ -266,6 +285,8 @@ pub struct PianoRoll {
     /// and whether the drag has reported an edit (its end then closes it, even with the notes back as they were).
     pub(crate) graph: GraphLane,
     graph_drag: Option<(Vec<Event>, bool)>,
+    /// The graph lane's value snap, `Vel`'s and `Pan`'s ([`graph_lane::ROLL_PROPS`]): app settings, off by default.
+    pub value_snap: [ValueSnap; 2],
     /// The floating buttons over the selection.
     pub(crate) row: clips::FloatingRow,
     /// The selection box's pulse ([`clips::paint_pulse`]) and its handles' press animation.
@@ -285,6 +306,8 @@ pub struct PianoRoll {
     pending: Vec<PianoRollAction>,
     /// The playhead knob on the ruler.
     knob: PlayheadKnob,
+    /// The clip is a take being recorded ([`RollOptions::recording`]): nothing edits it.
+    recording: bool,
 }
 
 /// A touch on the grid (module docs). Outside a touch, the selection is the one showing.
@@ -350,6 +373,8 @@ enum Menu {
         closest: bool,
         region: Option<TimeRange>,
     },
+    /// The Humanize panel ([`humanize`]).
+    Humanize(humanize::Panel),
 }
 
 /// The scale-guess dialog's items.
@@ -401,6 +426,7 @@ impl PianoRoll {
             region: RangeSelect::default(),
             graph: GraphLane::default(),
             graph_drag: None,
+            value_snap: [ValueSnap::OFF; 2],
             row: clips::FloatingRow::default(),
             pulse: 0.0,
             press: clips::HandlePress::default(),
@@ -411,6 +437,7 @@ impl PianoRoll {
             paste: None,
             pending: Vec::new(),
             knob: PlayheadKnob::default(),
+            recording: false,
         }
     }
 
@@ -454,6 +481,9 @@ impl PianoRoll {
     }
 
     fn clip_mut<'a>(&self, song: &'a mut Song) -> Option<&'a mut Clip> {
+        if self.recording {
+            return None;
+        }
         let lane = song
             .channels
             .get_mut(self.channel)?
@@ -461,6 +491,15 @@ impl PianoRoll {
             .get_mut(self.lane)
             .filter(|l| l.kind == LaneKind::Notes)?;
         lane.clips.iter_mut().find(|c| Some(c.id) == self.clip_id)
+    }
+
+    /// The content tick the playhead shows at song tick `tick` ([`region::playhead_tick`]); on a take being recorded
+    /// (Honeydew's own, module docs), from the clip's start on, unfolded: the take grows to it.
+    fn playhead_at(&self, song: &Song, tick: u64, opts: &RollOptions) -> Option<f64> {
+        match self.clip(song).filter(|_| self.recording) {
+            Some(clip) => Some(tick as f64 - f64::from(clip.start_tick)),
+            None => region::playhead_tick(self.clip(song), tick, opts.previewing),
+        }
     }
 
     /// The ghost notes to draw over the content ticks `view`, `px` ticks a pixel ([`ghost_notes`]): none when the
@@ -523,6 +562,7 @@ impl PianoRoll {
         let keys = body.with_max_x(rect.left() + m.u(KEYS_W));
         let grid = body.with_min_x(keys.right() + m.t());
         let id = Id::new("piano_roll");
+        self.recording = opts.recording;
         let mut actions = std::mem::take(&mut self.pending);
         // A new note's sound ends after its gate.
         let now = ui.input(|i| i.time);
@@ -583,11 +623,19 @@ impl PianoRoll {
         self.grid_input(ui, &response, grid, m, song, &mut actions);
         let g = self.geom(grid.min, u);
 
-        // The grid and what lies on it.
-        let events = self.clip(song).map_or(&[][..], |c| &c.events);
-        let loop_ticks = self
-            .clip(song)
-            .map_or(BEAT * f64::from(bpb), |c| c.loop_len_beats * BEAT);
+        // The grid and what lies on it: a take being recorded as it shows live.
+        let live = (self.clip(song).filter(|_| self.recording))
+            .map(|c| crate::app::note_record::live(c, opts.playhead, bpb));
+        let shown = live.as_ref().or(self.clip(song));
+        let events = shown.map_or(&[][..], |c| &c.events);
+        // The Humanize panel's preview, in the notes' order (so the selection still fits it), drawn in their place.
+        // ponytail: recomputed every frame the panel shows; keep it by (panel, events) if a huge clip makes that show.
+        let preview = match self.menu {
+            Some(Menu::Humanize(panel)) => Some(panel.preview(events, &self.selected)),
+            _ => None,
+        };
+        let events = preview.as_deref().unwrap_or(events);
+        let loop_ticks = shown.map_or(BEAT * f64::from(bpb), |c| c.loop_len_beats * BEAT);
         let color = channel_color(
             song.channels.get(self.channel).map_or(0.0, |c| c.hue),
             cx.theme,
@@ -655,7 +703,8 @@ impl PianoRoll {
             cx,
         );
         if let Some(lane) = lane {
-            self.graph_lane(ui, id, lane, &g, song, color, cx, &mut actions);
+            let preview = preview.as_deref();
+            self.graph_lane(ui, id, (lane, preview), &g, song, color, cx, &mut actions);
         } else {
             // The lane went mid-drag: the drag ends as its release would.
             let events = self.clip(song).map_or(&[][..], |c| &c.events);
@@ -671,7 +720,7 @@ impl PianoRoll {
         let sig = song.time_sig;
         timeline::ruler(&bars_painter, bars, bars, g.origin.x, g.beat_w, sig, cx);
         let origin = region::clip_origin(self.clip(song));
-        let playhead = region::playhead_tick(self.clip(song), opts.playhead, opts.previewing);
+        let playhead = self.playhead_at(song, opts.playhead, opts);
         let at = RangeRuler {
             strip: bars,
             axis: TimeAxis {
@@ -709,8 +758,7 @@ impl PianoRoll {
         }
         // Clipped at the key column's right edge: at beat 0 its left half shows in the t gap. While the knob is
         // dragged, the line and the disc follow the finger.
-        let drawn =
-            region::playhead_tick(self.clip(song), opts.playhead + opts.lead, opts.previewing);
+        let drawn = self.playhead_at(song, opts.playhead + opts.lead, opts);
         let x = (self.knob).line_x(ui, m, &at, loop_ticks - 1.0, g.x(drawn.unwrap_or(0.0)));
         let line_painter = ui.painter_at(body.with_min_x(keys.right()));
         line_painter.set(line_slot, timeline::playhead_line_shapes(grid, x, cx));
@@ -728,7 +776,9 @@ impl PianoRoll {
         let below = (rect, ruler.bottom());
         let ink = color.to_color32();
         (self.graph).tab_below(ui, cx, id.with("graph tab"), below, tab_x, ink);
-        self.floating_buttons(ui, grid, &g, song, cx, &mut actions);
+        if !matches!(self.menu, Some(Menu::Humanize(_))) {
+            self.floating_buttons(ui, grid, &g, song, cx, &mut actions);
+        }
         self.paste_button(ui, id, grid, &g, song, cx, &mut actions);
         // The playhead knob over them all: above the Snap button, which it overhangs at beat 0, and takes the touches
         // there while it shows, as the playlist's.
@@ -743,7 +793,7 @@ impl PianoRoll {
             }
             None => {}
         }
-        self.menus(ui, id, snap_center, song, &mut actions, cx);
+        self.menus(ui, id, (snap_center, rect), song, &mut actions, cx);
         // After the menus, which take Escape first.
         self.keys(ui, grid, cx, song, &mut actions);
         // This frame's own edits are not outside changes.
@@ -826,8 +876,8 @@ impl PianoRoll {
     }
 
     /// What the grid's key rows show ([`Rows`]): light where the key is in the project scale (Chromatic reads as C
-    /// major) and in an instrument's key range on the channel (none without an instrument); lit where a
-    /// note is selected, the roll sounds the key (a key-column touch, a new note's gate, a dragged key) or it is in
+    /// major) and in an instrument's key range on the channel (none without an instrument; a plugin instrument plays
+    /// every key); lit where a note is selected, the roll sounds the key (a key-column touch, a new note's gate, a dragged key) or it is in
     /// `sounding` (the keyboard, typed notes, MIDI and the engine's keys on the channel, [`RollOptions::sounding`]).
     fn rows(&self, song: &Song, events: &[Event], sounding: u128) -> Rows {
         let (root, mask) = project_scale(song);
@@ -838,8 +888,7 @@ impl PianoRoll {
         };
         let modules = song.channels.get(self.channel).map(|c| &c.rack.modules);
         let ranges: Vec<(i8, i8)> = (modules.into_iter().flatten())
-            .filter(|m| crate::ui::rack::instrument(m.type_id).is_some())
-            .map(|m| (m.file.key_low, m.file.key_high))
+            .filter_map(crate::ui::rack::key_range)
             .collect();
         let light = std::array::from_fn(|k| {
             let key = k as u8;
@@ -891,7 +940,8 @@ impl PianoRoll {
     /// zooms the time. With Settings `Continuous scrolling during playback` on, while playing a clip longer than the
     /// view, the view keeps the playhead (folded into the clip's loop, clip-relative) a quarter in, and one finger
     /// scrolls no time. The time scrolls over 0 … the loop end or the last note's bar, plus [`TAIL_BARS`]; the rows
-    /// over the 128 keys.
+    /// over the 128 keys. On a take being recorded (Honeydew's own, module docs) the playhead is unfolded, the time
+    /// scrolls a view past it, and the view follows it with the setting on and turns a page with it off.
     fn scroll(
         &mut self,
         ui: &egui::Ui,
@@ -932,15 +982,26 @@ impl PianoRoll {
                 view: grid.y_range(),
             },
         ];
+        // A take being recorded: where its playhead is, in beats; the time scrolls a view past it.
+        let take = (self.playhead_at(song, opts.playhead + opts.lead, opts))
+            .filter(|_| self.recording)
+            .map(|tick| tick / BEAT);
+        if let Some(beat) = take {
+            axes[X].range[1] = axes[X].range[1].max(beat + axes[X].span());
+        }
         let was = axes;
         let loop_ticks = clip.map_or(0.0, |c| c.loop_len_beats * BEAT);
-        let follow =
-            (opts.continuous && opts.playing && loop_ticks / BEAT > axes[X].span()).then(|| {
-                geom::playhead(
-                    (opts.playhead + opts.lead) as f64 - region::clip_origin(clip) as f64,
-                    loop_ticks,
-                )
-            });
+        let follow = match take {
+            Some(beat) => opts.continuous.then_some(beat * BEAT),
+            None => {
+                (opts.continuous && opts.playing && loop_ticks / BEAT > axes[X].span()).then(|| {
+                    geom::playhead(
+                        (opts.playhead + opts.lead) as f64 - region::clip_origin(clip) as f64,
+                        loop_ticks,
+                    )
+                })
+            }
+        };
         let options = scroller::Options {
             covered: opts.covered,
             follow: follow.is_some(),
@@ -950,6 +1011,11 @@ impl PianoRoll {
             .update(ui, id.with("scroll"), u, &zones, &mut axes, options);
         if let Some(tick) = follow {
             scroller::follow(&mut axes[X], tick / BEAT);
+        } else if let Some(beat) = take
+            && !(axes[X].pos..axes[X].pos + axes[X].span()).contains(&beat)
+        {
+            // Setting off: the page turns, the playhead at the left edge.
+            axes[X].pos = beat.clamp(axes[X].range[0], axes[X].max());
         }
         let [x, y] = axes;
         if x.zoom != was[X].zoom {
@@ -1592,13 +1658,13 @@ impl PianoRoll {
     }
 
     /// The graph lane in the strip `strip`: `Vel` / `Pan` in the key column, the value area under the grid, and its
-    /// paint (see [`graph_lane::paint_notes`]), reported like a move.
+    /// paint (see [`graph_lane::paint_notes`]), reported like a move; it draws `preview`'s notes when there is one.
     #[allow(clippy::too_many_arguments)]
     fn graph_lane(
         &mut self,
         ui: &mut egui::Ui,
         id: Id,
-        strip: Rect,
+        (strip, preview): (Rect, Option<&[Event]>),
         g: &Geom,
         song: &mut Song,
         color: Rgba,
@@ -1622,6 +1688,7 @@ impl PianoRoll {
         // From the grid's x: the list column, then a t gap of the frame's `background` (as the grid's).
         let values = content.with_min_x(strip.left() + list_w + m.t());
         let prop = graph_lane::ROLL_PROPS[self.graph.item];
+        let land = prop.land(self.value_snap[self.graph.item]);
 
         // The paint: at touch-down and at every move, the eligible notes under x take the value under y.
         let response = ui.interact(values, id.with("graph"), Sense::drag());
@@ -1643,12 +1710,11 @@ impl PianoRoll {
             let events = self.clip(song).map_or(&[][..], |c| &c.events);
             self.graph_drag = Some((events.to_vec(), false));
         }
-        if response.dragged()
-            && live
-            && let Some(p) = response.interact_pointer_pos()
-            && self.graph_drag.is_some()
-        {
-            let value = prop.stored(graph_lane::v_at(values, p.y));
+        // The finger and the value it paints, on the value grid while its snap is on.
+        let touch = (response.interact_pointer_pos())
+            .filter(|_| response.dragged() && live && self.graph_drag.is_some())
+            .map(|p| (p, prop.landed(graph_lane::v_at(values, p.y), land)));
+        if let Some((p, value)) = touch {
             let tick = g.tick(p.x);
             let painted = self.clip_mut(song).is_some_and(|clip| {
                 graph_lane::paint_notes(&mut clip.events, &self.selected, prop, tick, value)
@@ -1672,22 +1738,44 @@ impl PianoRoll {
             self.graph_drag_end(events, actions);
         }
 
-        // The value area: guides, beat lines, the past-the-end overlay, then a stem and a cap per note.
+        // The value area: guides or the value grid, beat lines, the past-the-end overlay, then a stem and a cap per
+        // note, and a drag's value label.
         let painter = ui.painter_at(values);
         let px = 1.0 / m.ppp();
         let (top, bottom, h) = (values.top(), values.bottom(), values.height());
+        // A value's cap: Pan's from the centre, the others' from the bottom.
+        let cap_y = |v: u16| {
+            let p = prop.frac(v);
+            m.round_px(match prop {
+                Prop::Pan => top - px + h / 2.0 - (h - 2.0 * px) * (2.0 * p - 1.0) / 2.0,
+                _ => bottom - h * p,
+            })
+        };
         painter.rect_filled(values, 0.0, colors.control_fill.to_color32());
-        // Ten 1 px guides, each the row ending at k·h/10: the 50 % one is the Pan stems' centre (lane.y − 1 + h/2),
-        // and the 0 % one lies on the gap's last row, above the value area.
-        let guides = ui.painter_at(values.with_min_y(top - px));
-        let guide = Color32::from_black_alpha(GUIDE_ALPHA);
-        for k in 0..10 {
-            let y = m.round_px(top + k as f32 * h / 10.0);
-            guides.rect_filled(
-                Rect::from_x_y_ranges(values.x_range(), y - px..=y),
-                0.0,
-                guide,
-            );
+        // The value grid while its snap is on (#32), as the automation editor's, in place of the guides: `text` lines
+        // on the caps' rows, when at least 0.25 U apart.
+        let lines = (land.grid())
+            .filter(|&step| h * step as f32 / f32::from(prop.max()) >= m.u(GRID_GAP))
+            .map(|_| land.lines(prop.max()));
+        if let Some(lines) = lines {
+            let ink = colors.text.to_color32().gamma_multiply(GRID_ALPHA);
+            for y in lines.into_iter().map(cap_y) {
+                let line = Rect::from_x_y_ranges(values.x_range(), y..=y + px);
+                painter.rect_filled(line, 0.0, ink);
+            }
+        } else {
+            // Ten 1 px guides, each the row ending at k·h/10: the 50 % one is the Pan stems' centre (lane.y − 1 +
+            // h/2), and the 0 % one lies on the gap's last row, above the value area.
+            let guides = ui.painter_at(values.with_min_y(top - px));
+            let guide = Color32::from_black_alpha(GUIDE_ALPHA);
+            for k in 0..10 {
+                let y = m.round_px(top + k as f32 * h / 10.0);
+                guides.rect_filled(
+                    Rect::from_x_y_ranges(values.x_range(), y - px..=y),
+                    0.0,
+                    guide,
+                );
+            }
         }
         let bpb = song.time_sig.bar_beats();
         paint_marks(&painter, values, g, song.time_sig, cx);
@@ -1700,7 +1788,7 @@ impl PianoRoll {
             painter.rect_filled(past, 0.0, Color32::from_black_alpha(PAST_END_LANE_ALPHA));
         }
         let tints = graph_lane::hit_tints(colors, color, prop);
-        let events = self.clip(song).map_or(&[][..], |c| &c.events);
+        let events = preview.unwrap_or_else(|| self.clip(song).map_or(&[][..], |c| &c.events));
         for pass in [false, true] {
             for (e, _) in events
                 .iter()
@@ -1712,20 +1800,28 @@ impl PianoRoll {
                 };
                 let x0 = m.round_px(g.x(pos));
                 let x1 = g.x(pos + len).max(x0 + px);
-                let p = prop.frac(v);
-                let (from, to) = match prop {
-                    Prop::Pan => {
-                        let c = top - px + h / 2.0;
-                        (c, c - (h - 2.0 * px) * (2.0 * p - 1.0) / 2.0)
-                    }
-                    _ => (bottom, bottom - h * p),
+                let from = match prop {
+                    Prop::Pan => top - px + h / 2.0,
+                    _ => bottom,
                 };
                 let ink = graph_lane::hit_color(&tints, prop, v, pass);
-                let y = m.round_px(to);
+                let y = cap_y(v);
                 let stem = Rect::from_x_y_ranges(x0..=x0 + 4.0 * px, y.min(from)..=y.max(from));
                 painter.rect_filled(stem, 0.0, ink);
                 painter.rect_filled(Rect::from_x_y_ranges(x0..=x1, y..=y + 2.0 * px), 0.0, ink);
             }
+        }
+        // The value under a dragging finger, on its cap's row ([`value_label`]).
+        if let Some((p, v)) = touch {
+            let at = pos2(p.x, cap_y(v) + px);
+            let midi =
+                land.grid().is_some() && self.value_snap[self.graph.item].grid == ValueGrid::Steps;
+            let text = match prop {
+                Prop::Velocity if midi => format!("MIDI {}", v >> 1),
+                Prop::Velocity => format!("{} %", (100.0 * prop.frac(v)).round()),
+                _ => DRUM_SLOT_PARAMS[1].display_text(prop.frac(v)),
+            };
+            value_label(&painter, cx, at, px, &text, &mut Vec::new());
         }
     }
 
@@ -1820,12 +1916,13 @@ impl PianoRoll {
         }
     }
 
-    /// The open popup, if any: the snap menu or the note menu.
+    /// The open popup, if any: the snap menu, the note menu or one of its dialogs; the Humanize panel beside the roll
+    /// `over`.
     fn menus(
         &mut self,
         ui: &egui::Ui,
         id: Id,
-        snap_center: Pos2,
+        (snap_center, over): (Pos2, Rect),
         song: &mut Song,
         actions: &mut Vec<PianoRollAction>,
         cx: &UiCtx,
@@ -1834,18 +1931,25 @@ impl PianoRoll {
         let bounds = ctx.content_rect();
         match self.menu {
             Some(Menu::Snap) => {
-                let items: Vec<PopupItem<SnapMode>> = SnapMode::ALL
-                    .iter()
-                    .enumerate()
-                    .map(|(row, &mode)| PopupItem {
-                        current: mode == self.snap.mode,
-                        ..PopupItem::new(mode, 0, row, mode.label())
-                    })
-                    .collect();
+                // Beside the time modes, the value snap of the graph lane's item (#32): its percents, then Vel's MIDI
+                // velocities or Pan's left, centre and right.
+                let item = self.graph.item;
+                let steps = ["MIDI", "L/C/R"][item];
+                let grids = (ValueGrid::ALL.into_iter()).filter(|&g| g != ValueGrid::Rows);
+                let grids = grids.map(|g| match g {
+                    ValueGrid::Steps => (g, steps.to_owned()),
+                    _ => (g, g.label()),
+                });
+                let vs = (self.value_snap[item], graph_lane::ROLL_LABELS[item]);
+                let items = value::snap_items(self.snap.mode, vs, grids);
                 let result =
                     popup::show(ctx, id.with("snap_menu"), snap_center, bounds, &items, cx);
-                if let Some(mode) = result.selected {
-                    self.snap = Snap { on: true, mode };
+                match result.selected {
+                    Some(Pick::Time(mode)) => self.snap = Snap { on: true, mode },
+                    Some(Pick::Value(grid)) => {
+                        self.value_snap[item] = self.value_snap[item].picked(grid);
+                    }
+                    None => {}
                 }
                 if result.close {
                     self.menu = None;
@@ -1872,6 +1976,20 @@ impl PianoRoll {
                 region,
             }) => {
                 self.guess(ctx, id, (more, closest, region), song, actions, cx);
+            }
+            Some(Menu::Humanize(mut panel)) => {
+                let hue = song.channels.get(self.channel).map_or(0.0, |c| c.hue);
+                let ink = channel_color(hue, cx.theme).to_color32();
+                let was = panel;
+                let close = humanize::show(ctx, cx, id.with("humanize"), over, ink, &mut panel);
+                self.menu = close.is_none().then_some(Menu::Humanize(panel));
+                if close == Some(humanize::Close::Apply) {
+                    self.humanize(panel, song, actions);
+                }
+                // The preview was drawn before the panel changed: draw it again.
+                if close.is_some() || panel != was {
+                    ctx.request_repaint();
+                }
             }
             None => {}
         }
@@ -1921,8 +2039,8 @@ impl PianoRoll {
         }
     }
 
-    /// Applies a note-menu item to the selection, or opens its dialog in place of the menu at `at`; `seed` is for
-    /// `Humanize`.
+    /// Applies a note-menu item to the selection, or opens its dialog in place of the menu at `at`; `seed` is the
+    /// Humanize panel's first.
     fn more(
         &mut self,
         op: MoreOp,
@@ -1947,6 +2065,11 @@ impl PianoRoll {
                     closest: false,
                     region: None,
                 });
+                return;
+            }
+            MoreOp::Humanize => {
+                let panel = humanize::Panel::new(seed, self.selected.contains(&true));
+                self.menu = Some(Menu::Humanize(panel));
                 return;
             }
             _ => {}
@@ -1978,21 +2101,43 @@ impl PianoRoll {
                     self.remembered.slide = slide;
                 }
             }
-            MoreOp::Humanize => humanize_selected(&mut clip.events, sel, normal(seed)),
             // The dialogs opened above.
-            MoreOp::GuessScale | MoreOp::TransposeBy => {}
+            MoreOp::GuessScale | MoreOp::TransposeBy | MoreOp::Humanize => {}
         }
         let changed = clip.events != before;
         if changed {
             clip.fit_loop(bpb);
         }
-        // Humanize and Snap to scale re-sync whatever they changed (nothing, or only velocities, which the song diff
-        // alone takes for a graph-lane edit).
-        if matches!(op, MoreOp::Humanize | MoreOp::SnapToScale) {
+        // Snap to scale re-syncs whatever it changed (nothing, or only velocities, which the song diff alone takes for
+        // a graph-lane edit).
+        if op == MoreOp::SnapToScale {
             actions.push(PianoRollAction::Resync);
         } else if changed {
             edited(actions, true);
         }
+    }
+
+    /// The Humanize panel's `Apply`: its preview into the clip, re-sorted, the selection hidden, one final edit that
+    /// re-syncs whatever it changed (nothing, or only velocities, which the song diff alone takes for a graph-lane
+    /// edit).
+    fn humanize(
+        &mut self,
+        panel: humanize::Panel,
+        song: &mut Song,
+        actions: &mut Vec<PianoRollAction>,
+    ) {
+        let bpb = song.time_sig.bar_beats();
+        let Some(clip) = self.clip_mut(song) else {
+            return;
+        };
+        let before = clip.events.clone();
+        clip.events = panel.preview(&clip.events, &self.selected);
+        self.selected.fill(false);
+        sort(&mut clip.events, &mut self.selected);
+        if clip.events != before {
+            clip.fit_loop(bpb);
+        }
+        actions.push(PianoRollAction::Resync);
     }
 
     /// `Transpose by...` (module docs), from the menu's `(at, offset, from)`: the popup shows the offset of the drag

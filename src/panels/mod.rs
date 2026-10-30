@@ -466,6 +466,11 @@ pub fn panel_for(type_id: u16) -> Option<&'static Panel> {
         let lemon = [
             (honeydew_audio::lemon::REVERB, fx::lemon::reverb()),
             (honeydew_audio::lemon::LIMITER, fx::lemon::limiter()),
+            (
+                honeydew_audio::dynamic_eq::DYNAMIC_EQ,
+                fx::dynamic_eq::panel(),
+            ),
+            (honeydew_audio::modulator::MODULATOR, fx::modulator::panel()),
         ];
         fx.chain(inst).chain(lemon).collect()
     });

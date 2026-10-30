@@ -19,20 +19,24 @@ pub(super) struct Live {
     chain: LiveNoteChain,
     midi: Vec<LiveNoteChain>,
     stages: Vec<usize>,
+    /// Its note effects: a note past them all is what its MIDI sends forward.
+    effects: usize,
     /// The channel's current lane is a notes lane; until the app says, its first lane.
     pub notes_lane: bool,
 }
 
-/// The live path of `channel`, whose `instruments` the engine plays; `None` when nothing on it plays a note.
+/// The live path of `channel`, whose `instruments` the engine plays; `None` when nothing on it plays a note and it
+/// `forwards` none (it has no MIDI send).
 pub(super) fn build(
     song: &Song,
     channel: usize,
     instruments: &[(i32, InstrumentModule)],
+    forwards: bool,
     sample_rate: f32,
     tempo_bpm: f32,
 ) -> Result<Option<Live>, EngineError> {
     let kit = song.channels[channel].drum_kit.as_ref();
-    if instruments.is_empty() && kit.is_none_or(|kit| kit.slots.is_empty()) {
+    if instruments.is_empty() && kit.is_none_or(|kit| kit.slots.is_empty()) && !forwards {
         return Ok(None);
     }
     let end_beat = song_end_beat(song)?;
@@ -89,6 +93,7 @@ pub(super) fn build(
         chain,
         midi,
         stages,
+        effects: count,
         notes_lane: lanes
             .first()
             .is_some_and(|lane| lane.kind == LaneKind::Notes),

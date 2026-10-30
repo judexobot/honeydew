@@ -8,7 +8,7 @@ use std::sync::mpsc::SyncSender;
 
 use super::*;
 use crate::app::midi::{BURST_SECS, Midi};
-use crate::midi::device::{MidiChoice, MidiLink};
+use crate::midi::device::{Message, MidiChoice, MidiLink};
 use crate::midi::links;
 use crate::song::DrumGrid;
 
@@ -16,7 +16,7 @@ use crate::song::DrumGrid;
 #[derive(Default)]
 pub(super) struct Device {
     ports: RefCell<Vec<String>>,
-    tx: RefCell<Option<SyncSender<Vec<u8>>>>,
+    tx: RefCell<Option<SyncSender<Message>>>,
     opens: RefCell<usize>,
     lists: RefCell<usize>,
 }
@@ -53,9 +53,15 @@ impl Rig {
 
     /// The controller sends `messages`; the next frame plays them.
     pub(super) fn midi(&mut self, device: &Device, messages: &[&[u8]]) {
+        self.midi_from(device, "Keys", messages);
+    }
+
+    /// [`Self::midi`] from the device named `name`.
+    fn midi_from(&mut self, device: &Device, name: &str, messages: &[&[u8]]) {
         for message in messages {
             let tx = device.tx.borrow();
-            tx.as_ref().expect("open").send(message.to_vec()).unwrap();
+            let message = (name.to_owned(), message.to_vec());
+            tx.as_ref().expect("open").send(message).unwrap();
         }
         self.frame(vec![]);
     }
@@ -264,6 +270,75 @@ fn rec_records_a_linked_move_of_the_recent_control_as_it_does_a_hand_move() {
     let clip = &lane.expect("a recorded lane").clips[0];
     let last = points::points(clip, PointKey::Automation).pop();
     assert_eq!(last.map(|p| p.value), Some(points::raw(32.0 / 127.0)));
+    // The CC records through its link alone: no lane of channel 1's own CC 20 param.
+    let automated = lanes.iter().filter(|l| l.target.is_some()).count();
+    assert_eq!(automated, 1);
+}
+
+#[test]
+fn rec_records_each_midi_cc_and_the_pitch_bend_in_a_thinned_lane_of_its_own_undone_with_the_notes()
+{
+    use crate::song::points::{self, PointKey};
+    let (mut rig, keys) = midi_rig();
+    rig.app.settings.count_in = false;
+    rig.app.main_screen.armed = true;
+    let (lanes, undos) = (rig.app.song.channels[1].lanes.len(), undo_steps(&mut rig));
+    rig.midi(&keys, &[&[0x90, 60, 100]]);
+    assert!(rig.app.main_screen.playing, "the note started the take");
+    // An eighth of a beat a frame: CC 74 up in a straight line and back down, CC 1 the other way, the pitch bend as
+    // CC 74 (MSB only).
+    for (i, v) in [0u8, 16, 32, 48, 64, 48, 32].into_iter().enumerate() {
+        rig.rec.0.borrow_mut().tick = i as u64 * 16;
+        rig.midi(&keys, &[&[0xB0, 74, v], &[0xB0, 1, 127 - v], &[0xE0, 0, v]]);
+    }
+    rig.midi(&keys, &[&[0x80, 60, 0]]);
+    let notes = |rig: &Rig| {
+        let lanes = rig.app.song.channels[1].lanes.iter();
+        let events = lanes.flat_map(|l| &l.clips).flat_map(|c| &c.events);
+        events
+            .filter(|e| matches!(e, crate::song::Event::Note { .. }))
+            .count()
+    };
+    assert_eq!(notes(&rig), 1);
+    let recorded: Vec<_> = (rig.app.song.channels[1].lanes[lanes..].iter())
+        .map(|l| {
+            let [clip] = &l.clips[..] else {
+                panic!("{l:?}")
+            };
+            let pts = points::points(clip, PointKey::Automation);
+            let pts: Vec<_> = pts.iter().map(|p| (p.tick, p.value)).collect();
+            (l.label.as_str(), l.target.map(|t| t.param), pts)
+        })
+        .collect();
+    // Each sweep keeps its corners: the start, the turn, the end.
+    let cc = |v: u8| crate::app::auto_record::point_value(f32::from(v) / 127.0);
+    let bend = |v: u8| points::raw(f32::from(v) * 128.0 / 16383.0);
+    assert_eq!(
+        recorded,
+        [
+            (
+                "Pitch Bend",
+                Some(4),
+                vec![(0, 0), (64, bend(64)), (96, bend(32))]
+            ),
+            (
+                "CC 1 Modulation",
+                Some(8),
+                vec![(0, cc(127)), (64, cc(63)), (96, cc(95))]
+            ),
+            (
+                "CC 74 Brightness",
+                Some(81),
+                vec![(0, 0), (64, cc(64)), (96, cc(32))]
+            ),
+        ]
+    );
+    // Stop: the notes and the controllers are one undo step, and its undo takes them all.
+    rig.click(PLAY);
+    assert_eq!(undo_steps(&mut rig), undos + 1);
+    rig.frame(z(egui::Modifiers::NONE));
+    assert_eq!(rig.app.song.channels[1].lanes.len(), lanes);
+    assert_eq!(notes(&rig), 0);
 }
 
 /// `Set MIDI Note` learns in both drum modes: the step sequencer, or the free note-grid (`grid`).
@@ -348,7 +423,7 @@ fn what_the_keyboard_sent_while_the_page_was_hidden_is_dropped_on_its_return() {
         [0x80, 60, 0],
         [0x90, 62, 100],
     ] {
-        tx.send(message.to_vec()).unwrap();
+        tx.send(("Keys".to_owned(), message.to_vec())).unwrap();
     }
     rig.frame(vec![]);
     assert_eq!(rig.take(), Vec::<String>::new());
@@ -388,7 +463,7 @@ fn a_key_the_old_connection_queued_is_released_by_the_reconnect_in_the_same_fram
     let (mut rig, keys) = midi_rig();
     // The note-on waits in the queue when the frame finds the keyboard gone: the frame drains it, then releases.
     let tx = keys.tx.borrow().clone().expect("open");
-    tx.send(vec![0x90, 60, 100]).unwrap();
+    tx.send(("Keys".to_owned(), vec![0x90, 60, 100])).unwrap();
     keys.ports.borrow_mut().clear();
     rig.next_frame_at(rig.time + 2.0);
     rig.frame(vec![]);

@@ -18,6 +18,10 @@ pub enum Learn {
 /// A note-on's velocity per MIDI step: v·0.007874, ≈ v/127.
 const VELOCITY_STEP: f32 = 0.007874;
 
+/// A channel a message reaches, and whether it sounds there (else REC only hears it: an armed channel that neither is
+/// selected nor monitors).
+pub type Target = (usize, bool);
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Out {
     MidiNote {
@@ -39,6 +43,7 @@ pub enum Out {
         key: u8,
         on: bool,
         velocity: f32,
+        sound: bool,
     },
     /// A live channel param: 7 + CC, 4 = pitch bend, 5 = aftertouch.
     ChannelParam {
@@ -57,6 +62,16 @@ pub enum Out {
     LearnedCc(u8),
 }
 
+fn note((channel, sound): Target, key: u8, on: bool, velocity: f32) -> Out {
+    Out::Note {
+        channel,
+        key,
+        on,
+        velocity,
+        sound,
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Router {
     pub learn: Learn,
@@ -66,9 +81,16 @@ pub struct Router {
 }
 
 impl Router {
-    /// Routes one message to `channel` (the selected one); `links` are every channel's ([`super::links::song_links`]).
-    /// All 16 MIDI channels are merged (omni).
-    pub fn route(&mut self, msg: MidiMsg, channel: usize, links: &[(usize, CcLink)]) -> Vec<Out> {
+    /// Routes one message from `device` to `targets` (the channels whose MIDI input it passes: the selected one, the
+    /// monitoring and the armed ones); `links` are every channel's ([`super::links::song_links`]). A key's note-off goes
+    /// where its note-on from the same device and MIDI channel went.
+    pub fn route(
+        &mut self,
+        device: &str,
+        msg: MidiMsg,
+        targets: &[Target],
+        links: &[(usize, CcLink)],
+    ) -> Vec<Out> {
         let mut out = Vec::new();
         if let MidiMsg::NoteOff { ch, key, vel } = msg
             && let Some(old) = self.midi_held.remove(&(ch, key))
@@ -82,37 +104,25 @@ impl Router {
             }];
         }
         match msg {
-            MidiMsg::NoteOn { key, vel, .. } => {
-                // The key sounds on one channel at a time, so no note is ever stranded.
-                if let Some(old) = self.held.insert(key, channel)
-                    && old != channel
-                {
-                    out.push(Out::Note {
-                        channel: old,
-                        key,
-                        on: false,
-                        velocity: 0.0,
-                    });
-                }
-                out.push(Out::Note {
-                    channel,
-                    key,
-                    on: true,
-                    velocity: f32::from(vel) * VELOCITY_STEP,
-                });
+            MidiMsg::NoteOn { ch, key, vel } => {
+                // The key sounds on one set of channels at a time, so no note is ever stranded.
+                let old = self
+                    .held
+                    .insert((device.to_owned(), ch, key), targets.to_vec());
+                let gone = old.into_iter().flatten().filter(|t| !targets.contains(t));
+                out.extend(gone.map(|t| note(t, key, false, 0.0)));
+                let velocity = f32::from(vel) * VELOCITY_STEP;
+                out.extend(targets.iter().map(|&t| note(t, key, true, velocity)));
                 if self.learn == Learn::Note {
                     self.learn = Learn::Off;
                     out.push(Out::LearnedNote(key));
                 }
             }
-            MidiMsg::NoteOff { key, vel, .. } => {
-                let channel = self.held.remove(&key).unwrap_or(channel);
-                out.push(Out::Note {
-                    channel,
-                    key,
-                    on: false,
-                    velocity: f32::from(vel) / 127.0,
-                });
+            MidiMsg::NoteOff { ch, key, vel } => {
+                let held = self.held.remove(&(device.to_owned(), ch, key));
+                let velocity = f32::from(vel) / 127.0;
+                let ends = held.unwrap_or_else(|| targets.to_vec());
+                out.extend(ends.into_iter().map(|t| note(t, key, false, velocity)));
             }
             MidiMsg::Cc { cc, .. } if self.learn == Learn::Cc => {
                 self.learn = Learn::Off;
@@ -131,26 +141,30 @@ impl Router {
                             value,
                         }),
                 );
-                // The selected channel's own CC param only when no link fired, or for the mod wheel. There
-                // is no CC #127 channel param.
+                // The targets' own CC param only when no link fired, or for the mod wheel. There is no CC #127
+                // channel param.
                 if (out.is_empty() || cc == 1) && cc < 127 {
-                    out.push(Out::ChannelParam {
+                    out.extend(sounding.map(|channel| Out::ChannelParam {
                         channel,
                         index: 7 + i32::from(cc),
                         value,
-                    });
+                    }));
                 }
             }
-            MidiMsg::PitchBend { value, .. } => out.push(Out::ChannelParam {
-                channel,
-                index: 4,
-                value: f32::from(value) / 16383.0,
-            }),
-            MidiMsg::ChannelPressure { value, .. } => out.push(Out::ChannelParam {
-                channel,
-                index: 5,
-                value: f32::from(value) / 127.0,
-            }),
+            MidiMsg::PitchBend { value, .. } => {
+                out.extend(sounding.map(|channel| Out::ChannelParam {
+                    channel,
+                    index: 4,
+                    value: f32::from(value) / 16383.0,
+                }))
+            }
+            MidiMsg::ChannelPressure { value, .. } => {
+                out.extend(sounding.map(|channel| Out::ChannelParam {
+                    channel,
+                    index: 5,
+                    value: f32::from(value) / 127.0,
+                }))
+            }
             // Ignored live.
             MidiMsg::Program { .. } => {}
         }
@@ -262,7 +276,7 @@ impl Router {
         }
     }
 
-    /// Note-offs for every held key, each on its own channel.
+    /// Note-offs for every held key, on each of its channels.
     pub fn release_all(&mut self) -> Vec<Out> {
         let mut midi: Vec<_> = std::mem::take(&mut self.midi_held)
             .into_iter()

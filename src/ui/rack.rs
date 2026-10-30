@@ -27,6 +27,11 @@
 //! A card's `Set Range` (`Set First Note` on a Slicer) learns the module's `ADD1` key range from the next keys played
 //! ([`RackPanel::key_played`]); the SENDS section edits the channel's `SEND`s by the channels the host names
 //! ([`RackPanel::targets`], [`send_targets`]); `Create FX Channel` asks the host ([`create_send`]).
+//!
+//! Honeydew's own: a dynamics card (a module that [takes a key](honeydew_audio::takes_key)) has `Sidechain` in its ≡
+//! menu, which picks the channel whose output keys its detector, or `Sidechain: Off` ([`RackPanel::key_menu`]); its
+//! header shows the source's name. A Modulator's ≡ menu adds `Modulate recent control` and `Clear target`, which set
+//! the param it drives ([`retarget`], a final song edit and so an undo step); its header shows the target's name.
 
 use std::collections::HashMap;
 
@@ -48,8 +53,8 @@ use crate::panels::{self, PanelState, cstm};
 use crate::params::{COMMON_PARAMS, ParamSpec, Role, module_spec};
 use crate::project_files::PresetSource;
 use crate::song::{
-    AutomationTarget, Channel, ChannelKind, LaneKind, ModuleInstance, Rack, SendState, Song,
-    SynthKind, output_bus,
+    AutomationTarget, Channel, ChannelKind, LaneKind, MidiSend, Modulation, ModuleInstance, Rack,
+    SendState, Song, SynthKind, output_bus,
 };
 use crate::theme::channel_color;
 use crate::ui::ctrl_menu::{CtrlAction, Touch};
@@ -157,6 +162,8 @@ pub fn ui_height(type_id: u16) -> Option<f32> {
         // Plugin modules: their status, the editor button and a page of params.
         crate::song::plugin::PLUGIN_INSTRUMENT | crate::song::plugin::PLUGIN_EFFECT => 8.0,
         honeydew_audio::lemon::REVERB | honeydew_audio::lemon::LIMITER => 7.0,
+        honeydew_audio::dynamic_eq::DYNAMIC_EQ => 11.0,
+        honeydew_audio::modulator::MODULATOR => 8.5,
         _ => return None,
     })
 }
@@ -172,6 +179,14 @@ pub fn module_name(type_id: u16) -> &'static str {
 /// The instrument of module type `type_id`, `None` for an effect or an unknown type.
 pub(crate) fn instrument(type_id: u16) -> Option<SynthKind> {
     SynthKind::ALL.into_iter().find(|s| s.type_id() == type_id)
+}
+
+/// The keys instrument module `module` plays, `None` for an effect. A plugin instrument plays every key.
+pub(crate) fn key_range(module: &ModuleInstance) -> Option<(i8, i8)> {
+    match module.type_id {
+        crate::song::plugin::PLUGIN_INSTRUMENT => Some((0, 127)),
+        t => instrument(t).map(|_| (module.file.key_low, module.file.key_high)),
+    }
 }
 
 /// The card icon. Instruments have icon 2 (keys), effects icon 8 (faders) and note effects icon 75 (notes).
@@ -221,11 +236,13 @@ pub struct Flow {
     pub bottom: f32,
 }
 
-/// What the SENDS section holds: a row per send, and whether the `Disconnected from MASTER` row shows.
+/// What the SENDS section holds: a row per send, and whether the `Disconnected from MASTER` row shows; on a channel that
+/// plays notes, a row per MIDI send and `Add MIDI Send`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct SendRows {
     pub rows: usize,
     pub disconnected: bool,
+    pub midi: Option<usize>,
 }
 
 /// The SENDS section's rows, in device pixels.
@@ -234,8 +251,12 @@ pub struct SendsFlow {
     pub header: Rect,
     /// One per send, in the channel's `SEND` order.
     pub rows: Vec<Rect>,
+    /// One per MIDI send, in the channel's order.
+    pub midi_rows: Vec<Rect>,
     /// `Add Send`.
     pub add: Rect,
+    /// `Add MIDI Send`, the right half of `Add Send`'s row.
+    pub midi_add: Option<Rect>,
     /// The `Disconnected from MASTER` label's row.
     pub disconnected: Option<Rect>,
 }
@@ -244,7 +265,7 @@ pub struct SendsFlow {
 pub fn flow(rack: Rect, scroll: f32, u: f32, input: bool, heights: &[f32], sends: bool) -> Flow {
     let rows = SendRows {
         rows: 1,
-        disconnected: false,
+        ..SendRows::default()
     };
     flow_sends(rack, scroll, u, input, heights, sends.then_some(rows))
 }
@@ -254,8 +275,9 @@ pub fn flow(rack: Rect, scroll: f32, u: f32, input: bool, heights: &[f32], sends
 /// card gap under the header and the first card directly under it, else the first card starts there; the others a
 /// card gap (trunc(0.35 U)) apart;
 /// `Add Module` follows like another card (1 U lower when there are no cards and no input row); with `sends`, the
-/// SENDS header 0.75 U under it, a row per send, 1 px, `Add Send`, and the `Disconnected from MASTER` row when that
-/// applies. Edges are floored to whole pixels one by one.
+/// SENDS header 0.75 U under it, a row per send, a row per MIDI send, 1 px, `Add Send` (sharing its row with `Add MIDI
+/// Send`, half each, on a channel that plays notes), and the `Disconnected from MASTER` row when that applies. Edges are
+/// floored to whole pixels one by one.
 pub fn flow_sends(
     rack: Rect,
     scroll: f32,
@@ -283,11 +305,21 @@ pub fn flow_sends(
         y += SENDS_GAP * u;
         let header = row(&mut y, ROW * u, 0.0);
         let rows = (0..sends.rows).map(|_| row(&mut y, ROW * u, 0.0)).collect();
+        let midi = sends.midi.unwrap_or(0);
+        let midi_rows = (0..midi).map(|_| row(&mut y, ROW * u, 0.0)).collect();
         y += 1.0;
+        let mut add = row(&mut y, ROW * u, 0.0);
+        let midi_add = sends.midi.map(|_| {
+            let (left, right) = add.split_left_right_at_x(add.center().x.floor());
+            add = left;
+            right
+        });
         SendsFlow {
             header,
             rows,
-            add: row(&mut y, ROW * u, 0.0),
+            midi_rows,
+            add,
+            midi_add,
             disconnected: sends.disconnected.then(|| row(&mut y, ROW * u, 0.0)),
         }
     });
@@ -454,6 +486,11 @@ pub enum CardAction {
     SetRange,
     /// `Set Full Range`: instrument cards but the Slicer's, while the key range is not 0–127.
     SetFullRange,
+    /// `Sidechain`: a module that takes a key; opens its source menu ([`RackPanel::key_menu`]).
+    Sidechain,
+    /// A Modulator's `Modulate recent control` and `Clear target` ([`modulator_menu`]).
+    Modulate,
+    ClearTarget,
 }
 
 /// What a preset picker loads into.
@@ -523,7 +560,10 @@ pub fn apply(rack: &mut Rack, instance_id: i32, action: CardAction) -> Outcome {
         CardAction::Replace => Outcome::Browse(InsertAt::Replace(instance_id)),
         CardAction::Copy => Outcome::Copied,
         CardAction::SavePreset => Outcome::SavePreset,
-        CardAction::SetRange => Outcome::Nothing,
+        CardAction::SetRange
+        | CardAction::Sidechain
+        | CardAction::Modulate
+        | CardAction::ClearTarget => Outcome::Nothing,
         // The engine reads the key range at build.
         CardAction::SetFullRange => {
             let file = &mut rack.modules[index].file;
@@ -771,7 +811,7 @@ fn attaches(module: &ModuleInstance, notes: bool) -> bool {
 
 /// The ≡ menu of a card of module type `type_id`, two columns, every item enabled. An instrument's adds `Set Range`
 /// (`Set First Note` on a Slicer) at the foot of the first column, and under it `Set Full Range` while its key range is
-/// not `full` (never on a Slicer).
+/// not `full` (never on a Slicer); a module that takes a key adds `Sidechain` there.
 fn card_menu(minimized: bool, type_id: u16, full: bool) -> Vec<PopupItem<CardAction>> {
     use CardAction::*;
     let minimize = if minimized { "Maximize" } else { "Minimize" };
@@ -781,6 +821,7 @@ fn card_menu(minimized: bool, type_id: u16, full: bool) -> Vec<PopupItem<CardAct
             Some((SetRange, 0, 4, "Set Range")),
             (!full).then_some((SetFullRange, 0, 5, "Set Full Range")),
         ),
+        None if honeydew_audio::takes_key(type_id) => (Some((Sidechain, 0, 4, "Sidechain")), None),
         None => (None, None),
     };
     [
@@ -803,6 +844,56 @@ fn card_menu(minimized: bool, type_id: u16, full: bool) -> Vec<PopupItem<CardAct
         ..PopupItem::new(action, col, row, label)
     })
     .collect()
+}
+
+/// A Modulator's ≡ menu items after [`card_menu`]'s, under `Sidechain`: `Modulate recent control`, enabled while there
+/// is a recent control, and `Clear target`, while it has one.
+fn modulator_menu(recent: bool, target: bool) -> [PopupItem<CardAction>; 2] {
+    let item = |action, row, label, enabled: bool| PopupItem {
+        disabled: !enabled,
+        ..PopupItem::new(action, 0, row, label)
+    };
+    [
+        item(CardAction::Modulate, 5, "Modulate recent control", recent),
+        item(CardAction::ClearTarget, 6, "Clear target", target),
+    ]
+}
+
+/// The Modulator `modulator` of a channel whose targets are `modulations` drives `to` (a channel id and a param), or
+/// nothing; whether that changed them.
+pub fn retarget(
+    modulations: &mut Vec<Modulation>,
+    modulator: i32,
+    to: Option<(i32, AutomationTarget)>,
+) -> bool {
+    let before = modulations.clone();
+    modulations.retain(|m| m.modulator != modulator);
+    if let Some((channel, target)) = to {
+        modulations.push(Modulation {
+            modulator,
+            channel,
+            target,
+        });
+    }
+    *modulations != before
+}
+
+/// The names of the targets of channel `channel`'s Modulators, by their instance id: `» <channel> · <param>`, for
+/// those whose target is still there.
+pub fn modulation_names(song: &Song, channel: usize) -> Vec<(i32, String)> {
+    let Some(ch) = song.channels.get(channel) else {
+        return Vec::new();
+    };
+    (ch.file.modulations.iter())
+        .filter_map(|m| {
+            let index = song.channels.iter().position(|c| c.id == m.channel)?;
+            let label = song.automation_label(index, m.target)?;
+            Some((
+                m.modulator,
+                format!("» {} · {label}", song.channels[index].name),
+            ))
+        })
+        .collect()
 }
 
 /// Whether `module`'s key range is the full 0–127.
@@ -828,21 +919,32 @@ pub struct SendTarget {
     pub name: String,
     /// `Add Send` offers it: the master or a send channel that sends nothing back to the rack's channel.
     pub offered: bool,
+    /// A sidechain of the rack's modules may name it: not the master, and nothing of the rack's channel (its sends and
+    /// sidechains) leads to it, which would close a cycle.
+    pub key: bool,
     /// Its send bus (`RHED`@8): ≥ 1 on a send channel.
     pub bus: i32,
     /// A path of its sends reaches the master (the master itself does).
     pub to_master: bool,
+    /// `Add MIDI Send` offers it: an instrument or drum channel whose MIDI sends, on or off, lead back to the rack's
+    /// channel by no path.
+    pub midi: bool,
 }
 
 /// What channel `channel`'s sends can name: every other channel of `song`, in song order. `Add Send` offers each send
 /// channel by its name, and the master too (it can come back after its send was removed, and the menu has no other
-/// way); a channel whose sends lead back to `channel` is not offered, so the app never makes a cycle.
+/// way); a channel whose sends or sidechains lead back to `channel` is not offered, nor as a sidechain source one that
+/// `channel`'s lead to, nor as a MIDI send target one whose MIDI sends lead back to it, so the app never makes a cycle.
 pub fn send_targets(song: &Song, channel: usize) -> Vec<SendTarget> {
     let Some(this) = song.channels.get(channel) else {
         return Vec::new();
     };
-    // Whether a path of sends leads from channel id `from` to `to`.
-    let reaches = |from: i32, to: i32| {
+    // Each sidechain: (its source's id, its module's channel's id).
+    let keys: Vec<(i32, i32)> = (song.channels.iter())
+        .flat_map(|c| (c.rack.modules.iter()).filter_map(move |m| Some((m.key_source()?, c.id))))
+        .collect();
+    // Whether a path of sends, with `keyed` of sidechains too, leads from channel id `from` to `to`.
+    let reaches = |from: i32, to: i32, keyed: bool| {
         let (mut seen, mut stack) = (Vec::new(), vec![from]);
         while let Some(id) = stack.pop() {
             if id == to {
@@ -858,6 +960,24 @@ pub fn send_targets(song: &Song, channel: usize) -> Vec<SendTarget> {
                     .flat_map(|c| &c.file.sends)
                     .map(|s| s.target_channel_id),
             );
+            let keyed = keys.iter().filter(|&&(source, _)| keyed && source == id);
+            stack.extend(keyed.map(|&(_, channel)| channel));
+        }
+        false
+    };
+    // Whether a path of MIDI sends leads from channel id `from` to `to`.
+    let midi_reaches = |from: i32, to: i32| {
+        let (mut seen, mut stack) = (Vec::new(), vec![from]);
+        while let Some(id) = stack.pop() {
+            if id == to {
+                return true;
+            }
+            if !seen.contains(&id) {
+                seen.push(id);
+                let c = song.channels.iter().find(|c| c.id == id);
+                let sends = c.into_iter().flat_map(|c| &c.file.midi_sends);
+                stack.extend(sends.map(|s| s.target_channel_id));
+            }
         }
         false
     };
@@ -866,9 +986,12 @@ pub fn send_targets(song: &Song, channel: usize) -> Vec<SendTarget> {
         .map(|(index, c)| SendTarget {
             id: c.id,
             name: c.name.clone(),
-            offered: (index == 0 || c.kind == ChannelKind::EffectTrack) && !reaches(c.id, this.id),
+            offered: (index == 0 || c.kind == ChannelKind::EffectTrack)
+                && !reaches(c.id, this.id, true),
+            key: index != 0 && !reaches(this.id, c.id, true),
             bus: c.bus_id,
-            to_master: reaches(c.id, 0),
+            to_master: reaches(c.id, 0, false),
+            midi: c.kind.plays_notes() && !midi_reaches(c.id, this.id),
         })
         .collect()
 }
@@ -1145,12 +1268,20 @@ pub struct RackPanel {
     pub soundfonts: SoundFonts,
     /// The channels the rack's sends can name: the host sets it each frame ([`send_targets`]).
     pub targets: Vec<SendTarget>,
+    /// The recent control, by channel id, for a Modulator's `Modulate recent control`, and the names of the rack's
+    /// Modulators' targets ([`modulation_names`]): the host sets them each frame.
+    pub recent: Option<(i32, AutomationTarget)>,
+    pub modulations: Vec<(i32, String)>,
     /// The key-learn of `Set Range` / `Set First Note`: the module's instance id, and the low key once played.
     learning: Option<(i32, Option<u8>)>,
     /// The keys played on the channel since the last pass ([`Self::key_played`]).
     played: Vec<u8>,
     /// The open send-target menu: the send it retargets (`None`: `Add Send`) and its centre.
     send_menu: Option<(Option<usize>, Pos2)>,
+    /// The open `Add MIDI Send` menu's centre.
+    midi_menu: Option<Pos2>,
+    /// The open sidechain menu: its card and its centre ([`Self::key_menu`]).
+    key_menu: Option<(i32, Pos2)>,
     /// The card held to reorder it. Meanwhile every card shows minimized, a view the song does not hold.
     drag: Option<Drag>,
     /// The swap slides by instance id: how far (U) each card is drawn from its laid-out place.
@@ -1311,6 +1442,7 @@ impl RackPanel {
         let sends = (channel.kind != ChannelKind::Master).then(|| SendRows {
             rows: channel.file.sends.len(),
             disconnected: disconnected(channel, &self.targets),
+            midi: (channel.kind.plays_notes()).then_some(channel.file.midi_sends.len()),
         });
         let input = channel.kind == ChannelKind::AudioRecord;
         let end = flow_sends(rack, 0.0, u, input, &heights, sends).bottom;
@@ -1483,6 +1615,8 @@ impl RackPanel {
             || self.rack_menu.is_some()
             || self.dialog.is_some()
             || self.send_menu.is_some()
+            || self.midi_menu.is_some()
+            || self.key_menu.is_some()
             || self.input_menu.is_some();
         if taken || popup {
             self.scroller.yield_touch();
@@ -1725,11 +1859,21 @@ impl RackPanel {
             self.settle_output(channel);
             actions.replace_song = true;
         }
+        self.midi_sends(ui, cx, f, channel, ink, actions);
         // The four trailing spaces shift the group left.
         let add = f.add / ppp;
         add_row(ui, cx, add, "Add Send    ", ink, None);
         if ui.interact(add, base.with("add"), Sense::click()).clicked() {
             self.send_menu = Some((None, add.center()));
+        }
+        if let Some(add) = f.midi_add.map(|r| r / ppp) {
+            add_row(ui, cx, add, "Add MIDI Send    ", ink, None);
+            if ui
+                .interact(add, base.with("add midi"), Sense::click())
+                .clicked()
+            {
+                self.midi_menu = Some(add.center());
+            }
         }
         if let Some(row) = f.disconnected {
             let label = "Disconnected from MASTER";
@@ -1742,6 +1886,91 @@ impl RackPanel {
                 Align2::CENTER_CENTER,
                 text,
             );
+        }
+    }
+
+    /// The MIDI send rows in `f`, one per MIDI send of `channel`: as a send row, its toggle switches it on and off, a
+    /// `MIDI` tag stands where the swap icon would, its target's name takes the rest of the room and its X removes it.
+    /// Every edit is final: the engine prepares the forwarded notes ahead.
+    fn midi_sends(
+        &mut self,
+        ui: &mut Ui,
+        cx: &UiCtx,
+        f: &SendsFlow,
+        channel: &mut Channel,
+        ink: Color32,
+        actions: &mut RackActions,
+    ) {
+        let ppp = cx.m.ppp();
+        let base = ui.id().with("midi sends");
+        let mut remove = None;
+        let sends = channel.file.midi_sends.iter_mut();
+        for (i, (send, &row)) in sends.zip(&f.midi_rows).enumerate() {
+            let [toggle, tag, name, rest, x] = send_row(ui, cx, row / ppp);
+            let id = base.with(i);
+            let c = Control::new(id.with("enable"), toggle, "", ink, 1.0);
+            let mut on = if send.enabled { 1.0 } else { 0.0 };
+            if widgets::toggle(ui, cx, &c, &mut on, |_| String::new()).changed() {
+                send.enabled = on > 0.5;
+                actions.replace_song = true;
+            }
+            let label = |rect, text: &str| {
+                let align = Align2::CENTER_CENTER;
+                widgets::text_label(ui, cx, rect, text, FontSize::Pt10, align, ink);
+            };
+            label(tag, "MIDI");
+            let target = send.target_channel_id;
+            let named = self.targets.iter().find(|t| t.id == target);
+            let fallback = || format!("Channel {target}");
+            let name_text = named.map_or_else(fallback, |t| t.name.clone());
+            label(name.union(rest), &name_text);
+            if icon_button(ui, cx, id.with("remove"), x, IconId::Close, ink) {
+                remove = Some(i);
+            }
+        }
+        if let Some(i) = remove {
+            channel.file.midi_sends.remove(i);
+            actions.replace_song = true;
+        }
+    }
+
+    /// The open `Add MIDI Send` menu, one column: the instrument and drum channels it may name ([`SendTarget::midi`])
+    /// that the channel does not send to yet, or a dimmed `No channel to send to`. A pick adds a MIDI send, on; a final
+    /// edit.
+    fn midi_menu(&mut self, ui: &Ui, cx: &UiCtx, channel: &mut Channel, actions: &mut RackActions) {
+        let Some(at) = self.midi_menu else {
+            return;
+        };
+        let sends = &channel.file.midi_sends;
+        let free = |t: &&SendTarget| t.midi && !sends.iter().any(|s| s.target_channel_id == t.id);
+        let mut items: Vec<_> = (self.targets.iter().filter(free).enumerate())
+            .map(|(row, t)| PopupItem::new(t.id, 0, row, t.name.clone()))
+            .collect();
+        if items.is_empty() {
+            items.push(PopupItem {
+                disabled: true,
+                ..PopupItem::new(0, 0, 0, "No channel to send to")
+            });
+        }
+        let ctx = ui.ctx();
+        let r = popup::show(
+            ctx,
+            ui.id().with("midi menu"),
+            at,
+            ctx.content_rect(),
+            &items,
+            cx,
+        );
+        if r.close {
+            self.midi_menu = None;
+            ctx.request_repaint();
+        }
+        if let Some(id) = r.selected {
+            channel.file.midi_sends.push(MidiSend {
+                target_channel_id: id,
+                enabled: true,
+            });
+            actions.replace_song = true;
         }
     }
 
@@ -1806,6 +2035,39 @@ impl RackPanel {
                 actions.replace_song = true;
             }
             _ => {}
+        }
+    }
+
+    /// The open sidechain menu of a card's module, one column: `Sidechain: Off`, then each channel that may key it
+    /// ([`SendTarget::key`]) by name, the current pick shown current. A pick is a final edit, which rebuilds the engine.
+    fn key_menu(&mut self, ui: &Ui, cx: &UiCtx, channel: &mut Channel, actions: &mut RackActions) {
+        let Some((id, at)) = self.key_menu else {
+            return;
+        };
+        let Some(module) = channel.rack.get_mut(id) else {
+            self.key_menu = None;
+            return;
+        };
+        let current = module.sidechain;
+        let offered = (self.targets.iter()).filter(|t| t.key || Some(t.id) == current);
+        let picks = std::iter::once((None, "Sidechain: Off".to_owned()))
+            .chain(offered.map(|t| (Some(t.id), t.name.clone())));
+        let items: Vec<_> = (picks.enumerate())
+            .map(|(row, (pick, name))| PopupItem {
+                current: pick == current,
+                ..PopupItem::new(pick, 0, row, name)
+            })
+            .collect();
+        let ctx = ui.ctx();
+        let menu = ui.id().with("key menu");
+        let r = popup::show(ctx, menu, at, ctx.content_rect(), &items, cx);
+        if r.close {
+            self.key_menu = None;
+            ctx.request_repaint();
+        }
+        if let Some(pick) = r.selected.filter(|&pick| pick != current) {
+            module.sidechain = pick;
+            actions.replace_song = true;
         }
     }
 
@@ -1986,6 +2248,29 @@ impl RackPanel {
             module_name(module.type_id)
         };
         let (label, font) = (label.to_owned(), m.font_id(FontSize::Pt12));
+        // A sidechain's source and a Modulator's target, by name: 10 pt in the channel colour, at the label cell's right
+        // 0.5 U short of the preset button, in at most half the cell, or with a target what the title leaves of it.
+        let source = (module.key_source())
+            .and_then(|id| self.targets.iter().find(|t| t.id == id))
+            .map(|source| format!("SC: {}", source.name));
+        let target = self.modulations.iter().find(|(k, _)| *k == id);
+        let tags = [source, target.map(|(_, t)| t.clone())];
+        let tag = tags.into_iter().flatten().collect::<Vec<_>>().join("   ");
+        let name = match (!tag.is_empty()).then_some(tag) {
+            Some(tag) => {
+                let small = m.font_id(FontSize::Pt10);
+                let right = name.right() - m.u(0.5);
+                let room = match target {
+                    Some(_) => name.width() - text_width(ui, &label, font.clone()) - m.u(1.0),
+                    None => 0.0,
+                };
+                let w = text_width(ui, &tag, small.clone()).min(room.max(name.width() / 2.0));
+                let at = name.with_min_x(right - w).with_max_x(right);
+                widgets::truncated(ui.painter(), at, Align2::RIGHT_CENTER, &tag, small, ink, 0);
+                name.with_max_x(at.left() - m.u(0.25))
+            }
+            None => name,
+        };
         widgets::truncated(
             ui.painter(),
             name,
@@ -2298,6 +2583,8 @@ impl RackPanel {
         actions: &mut RackActions,
     ) {
         self.send_menu(ui, cx, channel, actions);
+        self.midi_menu(ui, cx, channel, actions);
+        self.key_menu(ui, cx, channel, actions);
         let ctx = ui.ctx();
         let screen = ctx.content_rect();
         if let Some((id, at)) = self.card_menu {
@@ -2305,7 +2592,11 @@ impl RackPanel {
                 self.card_menu = None;
                 return;
             };
-            let items = card_menu(module.minimized, module.type_id, full_range(module));
+            let mut items = card_menu(module.minimized, module.type_id, full_range(module));
+            if module.type_id == honeydew_audio::modulator::MODULATOR {
+                let target = self.modulations.iter().any(|(m, _)| *m == id);
+                items.extend(modulator_menu(self.recent.is_some(), target));
+            }
             let menu_id = ui.id().with(("rack card menu", id));
             let r = popup::show(ctx, menu_id, at, screen, &items, cx);
             if r.close {
@@ -2321,6 +2612,17 @@ impl RackPanel {
                 }
                 selected => selected,
             };
+            if selected == Some(CardAction::Sidechain) {
+                self.key_menu = Some((id, at));
+            }
+            let to = match selected {
+                Some(CardAction::Modulate) => Some(self.recent),
+                Some(CardAction::ClearTarget) => Some(None),
+                _ => None,
+            };
+            if let Some(to) = to {
+                actions.replace_song |= retarget(&mut channel.file.modulations, id, to);
+            }
             if selected == Some(CardAction::SetRange) {
                 // One key-learn at a time: another card's ends.
                 if let Some((other, _)) = self.learning.replace((id, None)) {

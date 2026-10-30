@@ -332,6 +332,36 @@ fn a_knobs_add_automation_track_opens_the_automation_editor_on_a_new_lane_named_
 }
 
 #[test]
+fn add_midi_cc_track_picks_a_cc_by_name_for_a_lane_on_the_selected_channel_in_one_undo_step() {
+    let mut rig = Rig::with_synth();
+    let (undos, lanes) = (rig.undos(), rig.app.song.channels[1].lanes.len());
+    rig.ctrl_pick("Add MIDI CC track…");
+    // The picker, past its slide-in: search, then the one match.
+    for _ in 0..3 {
+        rig.frame(vec![]);
+    }
+    rig.click_id(egui::Id::new("cc_picker").with("search"));
+    rig.frame(vec![egui::Event::Text("bright".into())]);
+    rig.frame(vec![]);
+    rig.click_id(egui::Id::new("cc_picker").with(("row", 0_usize)));
+    rig.frame(vec![]);
+    let ch = &rig.app.song.channels[1];
+    assert_eq!(ch.lanes.len(), lanes + 1);
+    let cc_74 = Some(target(0, 81));
+    let lane = ch.lanes.iter().position(|l| l.target == cc_74).unwrap();
+    assert_eq!(ch.lanes[lane].label, "CC 74 Brightness");
+    assert_eq!(ch.lanes[lane].clips.len(), 1);
+    assert_eq!(rig.app.nav.view, View::AutomationEditor(1));
+    assert_eq!(rig.undos(), undos + 1);
+    // A plain automation lane in the file: it saves and reopens as it is.
+    let read = crate::flm::read(&crate::flm::write(&rig.app.song).unwrap()).unwrap();
+    let l = &read.channels[1].lanes[lane];
+    assert_eq!((l.target, l.label.as_str()), (cc_74, "CC 74 Brightness"));
+    rig.frame(z(egui::Modifiers::NONE));
+    assert_eq!(rig.app.song.channels[1].lanes.len(), lanes);
+}
+
+#[test]
 fn a_send_lane_is_named_after_its_target_channel() {
     // `Send Level (to <name>)`: the name of the channel the send goes to.
     let mut rig = effects_rig();
@@ -479,6 +509,32 @@ fn link_to_recent_control_retargets_the_lane_keeps_its_points_and_rewrites_their
     assert_eq!(rig.undos(), undos + 1);
     // Every point's key is Drive's now, param 1 + 1: the stale kept bytes are not written back.
     assert_eq!(written_keys(&rig.app.song), [2, 2]);
+}
+
+#[test]
+fn modulate_recent_control_sets_a_modulators_target_in_one_undo_step() {
+    let mut rig = effects_rig();
+    let ch = &mut rig.app.song.channels[2];
+    let modulator = ch.rack.add(honeydew_audio::modulator::MODULATOR);
+    let id = ch.id;
+    rig.app.song_edited(SongEdit::Final, 0);
+    rig.frame(vec![]);
+    let drive = rig.text_rect("Drive").center();
+    rig.touch_at(drive);
+    let undos = rig.undos();
+    card_item(&mut rig, "Modulator", "Modulate recent control");
+    rig.frame(vec![]);
+    let set = vec![crate::song::Modulation {
+        modulator,
+        channel: id,
+        target: DRIVE,
+    }];
+    assert_eq!(rig.app.song.channels[2].file.modulations, set);
+    assert_eq!(rig.undos(), undos + 1);
+    // Undone, the Modulator drives nothing again.
+    let ctx = rig.ctx.clone();
+    rig.app.step(&ctx, crate::history::Step::Undo, 0);
+    assert_eq!(rig.app.song.channels[2].file.modulations, []);
 }
 
 // ---- `Delete automation?` ----
@@ -1228,4 +1284,30 @@ fn a_fine_tune_drag_of_the_tremolos_max_below_min_lowers_min_with_no_undo_step()
     rig.frame(z(egui::Modifiers::NONE));
     rig.frame(z(egui::Modifiers::SHIFT));
     assert_eq!(limits(&rig), (high, low));
+}
+
+#[test]
+fn a_tempo_change_makes_the_tempo_recent_and_add_automation_track_automates_it() {
+    // The tempo dialog's dial makes the master's tempo the recent control; CTRL's `Add automation track` gives the
+    // master a `Tempo` lane and opens it.
+    let mut rig = Rig::with_synth();
+    rig.frame(vec![]);
+    rig.click(BPM);
+    rig.frame(vec![]);
+    rig.press(dial(0));
+    for quarter in 1..=4 {
+        rig.drag_to(dial(quarter));
+    }
+    rig.release(dial(4));
+    rig.frame(vec![]);
+    assert_eq!(rig.recent(), Some((0, crate::song::TEMPO_TARGET)));
+    rig.frame(escape());
+    rig.frame(vec![]);
+    rig.ctrl_pick("Add automation track");
+    let lane = rig.app.song.channels[0].lanes.last().unwrap();
+    assert_eq!(
+        (lane.target, lane.label.as_str()),
+        (Some(crate::song::TEMPO_TARGET), "Tempo")
+    );
+    assert_eq!(rig.app.nav.view, View::AutomationEditor(0));
 }
