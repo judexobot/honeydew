@@ -120,9 +120,8 @@ pub struct SurgeXt {
     left: [f32; BLOCK],
     right: [f32; BLOCK],
     position: usize,
-    // Parameter defaults sent by Honeydew must not overwrite a freshly loaded
-    // original FXP. Later real UI gestures still reach the original DSP.
-    first_param: [bool; 33],
+    // In preset-only mode there are no editor parameters to sync:
+    // the original FXP owns all DSP settings and modulation assignments.
 }
 
 // The audio engine moves an Instrument between threads but never uses the same
@@ -166,11 +165,6 @@ impl SurgeXt {
         Ok(Self {
             api,
             instance,
-            // The first Honeydew parameter refresh contains *registry defaults*,
-            // not the parameter values in the original Surge FXP. This also
-            // applies to Init Saw (preset 0), whose real factory defaults were
-            // previously overwritten on creation and could make it silent.
-            first_param: [true; 33],
             left: [0.0; BLOCK],
             right: [0.0; BLOCK],
             position: BLOCK,
@@ -194,23 +188,13 @@ impl Drop for SurgeXt {
 }
 
 impl Instrument for SurgeXt {
-    fn set_parameter(&mut self, index: usize, value: f32) {
-        // p0 is Honeydew's own bypass. p1-p8 are Surge's genuine macros.
-        if !value.is_finite() {
-            return;
-        }
-        if (1..=32).contains(&index) && self.first_param[index] {
-            // First refresh after new instrument construction is just the
-            // Honeydew registry defaults, not an edit of the factory patch.
-            self.first_param[index] = false;
-            return;
-        }
-        if (1..=8).contains(&index) {
-            unsafe { (self.api.macro_value)(self.instance, (index - 1) as i32, value) };
-        } else if (9..=32).contains(&index) {
-            // Fixed 0-based original Surge DSP path ID, resolved during construction.
-            unsafe { (self.api.native_param)(self.instance, (index - 9) as i32, value) };
-        }
+    fn set_parameter(&mut self, _index: usize, _value: f32) {
+        // Preset-only instrument: ignore Honeydew's legacy 1..32 registry
+        // defaults, automation and periodic re-synchronization entirely.
+        // Applying even a single host default would change an official
+        // Surge XT factory patch (sometimes silencing it).
+        // p33 (factory preset choice) is applied by build/new_with_factory_preset,
+        // never in the realtime audio callback.
     }
 
     fn note_on(&mut self, key: u8, velocity: f32, _pan: f32) {
