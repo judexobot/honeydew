@@ -140,16 +140,9 @@ impl SurgeXt {
         }
         let api = *API.get_or_init(|| unsafe { Api::load() })
             .as_ref().ok_or("original Surge XT native library is not installed")?;
-        let instance = unsafe { (api.create)(sample_rate) };
-        if instance.is_null() {
-            status(-3, "Original Surge XT constructor returned null: engine initialization failed");
-            return Err("Surge XT failed to initialize its original synthesizer engine");
-        }
-        if preset != 0 && unsafe { (api.load_factory)(instance, preset as i32) } == 0 {
-            unsafe { (api.destroy)(instance) };
-            status(-4, "Native Surge XT could not load the selected factory FXP patch");
-            return Err("Original Surge XT factory preset could not be loaded");
-        }
+        // Run the initial PCM test BEFORE allocating the actual instrument:
+        // temporarily constructing two full Surge XT engines could exhaust RAM
+        // on Android phones. This is strictly off the realtime audio thread.
         // Test the *original* synth core with the official Init Saw patch,
         // rather than inferring audio success from a compiled .so. Run once
         // outside the realtime callback and report any silence in the UI.
@@ -159,6 +152,16 @@ impl SurgeXt {
             status(-5, &format!("Original Surge XT generated no PCM; probe peak={peak}"));
         } else {
             DIAGNOSTIC.store(2, Ordering::Relaxed);
+        }
+        let instance = unsafe { (api.create)(sample_rate) };
+        if instance.is_null() {
+            status(-3, "Original Surge XT constructor returned null: engine initialization failed");
+            return Err("Surge XT failed to initialize its original synthesizer engine");
+        }
+        if preset != 0 && unsafe { (api.load_factory)(instance, preset as i32) } == 0 {
+            unsafe { (api.destroy)(instance) };
+            status(-4, "Native Surge XT could not load the selected factory FXP patch");
+            return Err("Original Surge XT factory preset could not be loaded");
         }
         Ok(Self {
             api,
