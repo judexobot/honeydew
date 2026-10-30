@@ -138,11 +138,7 @@ pub fn buffer_mode(sound_mode: u8, low_latency: u8) -> BufferMode {
     let requested = (target > 0).then_some(BufferMode::Fixed(target));
     // The explicit buffer target is independent of the desktop Sound Mode. Native keeps
     // the device default; a selected target is applied in either Standard or Multitrack.
-    if cfg!(any(
-        target_os = "windows",
-        target_os = "macos",
-        target_os = "linux"
-    )) {
+    if cfg!(desktop) {
         return requested.unwrap_or(BufferMode::Native);
     }
     requested.unwrap_or(match sound_mode {
@@ -196,7 +192,7 @@ pub struct AudioLink {
     /// The input the last engine built got ([`Self::records`]).
     built_input: Option<LiveInput>,
     /// The metronome as last sent (`AudioCommand::Metronome`); each new engine gets it again.
-    metronome: Option<(bool, f32)>,
+    metronome: Option<(bool, bool, f32)>,
     /// The metronome flag as last sent (`AudioCommand::MetronomeFlag`), after the metronome: a runtime flag, off at
     /// start, kept across songs and never saved ([`Self::metronome_flag`]).
     metronome_flag: Option<(bool, f32)>,
@@ -317,7 +313,9 @@ impl AudioLink {
             return;
         }
         match cmd {
-            AudioCommand::Metronome { on, level } => self.metronome = Some((on, level)),
+            AudioCommand::Metronome { on, click, level } => {
+                self.metronome = Some((on, click, level))
+            }
             AudioCommand::MetronomeFlag { on, level } => self.metronome_flag = Some((on, level)),
             AudioCommand::CountIn(beats) => {
                 (self.count_in, self.held) = (Some(beats).filter(|b| *b > 0), None);
@@ -620,8 +618,8 @@ impl AudioLink {
         if self.multi_core {
             self.send(AudioCommand::SetMultiCore(true));
         }
-        if let Some((on, level)) = self.metronome {
-            self.send(AudioCommand::Metronome { on, level });
+        if let Some((on, click, level)) = self.metronome {
+            self.send(AudioCommand::Metronome { on, click, level });
         }
         if let Some((on, level)) = self.metronome_flag {
             self.send(AudioCommand::MetronomeFlag { on, level });
@@ -959,7 +957,10 @@ pub(crate) mod testing {
                 value,
             } => format!("SetSetting {channel} {instance_id} {key} {value:.3}"),
             AudioCommand::CountIn(beats) => format!("CountIn {beats}"),
-            AudioCommand::Metronome { on, level } => format!("Metronome {on} {level:.3}"),
+            AudioCommand::Metronome { on, click, level } => {
+                let silent = if *click { "" } else { " silent" };
+                format!("Metronome {on} {level:.3}{silent}")
+            }
             AudioCommand::MetronomeFlag { on, level } => format!("MetronomeFlag {on} {level:.3}"),
             AudioCommand::SetMultiCore(on) => format!("SetMultiCore {on}"),
             AudioCommand::Ping(id) => format!("Ping {id}"),
@@ -1031,8 +1032,8 @@ pub(crate) mod testing {
                     Some(engine),
                 ) => engine.midi_controller(channel, midi, index, value),
                 (AudioCommand::CountIn(beats), Some(engine)) => engine.count_in(beats),
-                (AudioCommand::Metronome { on, level }, Some(engine)) => {
-                    engine.set_metronome(on, level)
+                (AudioCommand::Metronome { on, click, level }, Some(engine)) => {
+                    engine.set_metronome(on, click, level)
                 }
                 (AudioCommand::MetronomeFlag { on, level }, Some(engine)) => {
                     engine.set_metronome_flag(on, level)
@@ -1549,6 +1550,7 @@ mod tests {
         link.input = Some(LiveInput::new(ring.clone(), Vec::new()));
         link.send(AudioCommand::Metronome {
             on: true,
+            click: true,
             level: 0.5,
         });
         assert_eq!(rec.take(), ["Metronome true 0.500"]);
@@ -1578,6 +1580,7 @@ mod tests {
         let mut fresh = AudioLink::default();
         fresh.send(AudioCommand::Metronome {
             on: false,
+            click: true,
             level: 0.25,
         });
         fresh.start(&song, true, &|_| None, |_, _| rec.sink());
