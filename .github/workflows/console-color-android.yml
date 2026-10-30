@@ -1,7 +1,7 @@
-name: Console Color · fidelity tests and Android ARM64
+name: Honeydew 0.4.2 + Custom Audio · Android ARM64
 on:
   push:
-    branches: [feature/console-color-fx, feature/console-color-fidelity-v2]
+    branches: [feature/console-color-fx, feature/console-color-fidelity-v2, integration/upstream-0.4.2-audio-custom]
   workflow_dispatch:
 concurrency:
   group: console-color-${{ github.ref }}
@@ -64,7 +64,7 @@ jobs:
         run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.0.13004108" tools/android-dist.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: Honeydew-ConsoleColor-SNES-GBA-N64-PS1-Android-arm64-debug
+          name: Honeydew-0.4.2-VocalTune-GameBoy-Gen-ConsoleColor-arm64-debug
           path: target/honeydew-android-*-arm64-debug.apk
           if-no-files-found: error
           retention-days: 7
