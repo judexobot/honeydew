@@ -14,7 +14,7 @@ import java.util.List;
 
 /** USB MIDI service adapter. Audio rendering never calls Java or takes these locks. */
 final class HoneydewMidiBridge {
-    private static native void onMidiMessage(byte[] message, int count);
+    private static native void onMidiMessage(String deviceName, byte[] message, int count);
     private final MidiManager manager;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final List<MidiDevice> devices = new ArrayList<>();
@@ -25,7 +25,7 @@ final class HoneydewMidiBridge {
             if (devices.stream().noneMatch(open -> open.getInfo().getId() == device.getId())) return;
             // An unplug cannot deliver Note Off. Send All Sound Off on every channel.
             byte[] panic = new byte[] {(byte) 0xB0, 120, 0};
-            for (int ch = 0; ch < 16; ch++) { panic[0] = (byte) (0xB0 | ch); onMidiMessage(panic, 3); }
+            for (int ch = 0; ch < 16; ch++) { panic[0] = (byte) (0xB0 | ch); onMidiMessage("Android MIDI", panic, 3); }
         }
     };
     HoneydewMidiBridge(Context context) {
@@ -38,7 +38,7 @@ final class HoneydewMidiBridge {
     private static String label(MidiDeviceInfo device, MidiDeviceInfo.PortInfo port) {
         String name = device.getProperties().getString(MidiDeviceInfo.PROPERTY_NAME, "USB MIDI");
         String portName = port.getName();
-        return name + " / " + (portName.isEmpty() ? "Port " + (port.getPortNumber() + 1) : portName);
+        return name + " / " + (portName == null || portName.isEmpty() ? "Port " + (port.getPortNumber() + 1) : portName);
     }
     String[] list() {
         List<String> names = new ArrayList<>();
@@ -65,7 +65,7 @@ final class HoneydewMidiBridge {
                         if (!"Any available".equals(choice) && !choice.equals(label(info, portInfo))) continue;
                         MidiOutputPort port = device.openOutputPort(portInfo.getPortNumber());
                         if (port == null) continue;
-                        port.connect(new Receiver()); ports.add(port); used = true;
+                        port.connect(new Receiver(label(info, portInfo))); ports.add(port); used = true;
                     }
                     if (used) devices.add(device);
                     else try { device.close(); } catch (IOException ignored) {}
@@ -82,6 +82,8 @@ final class HoneydewMidiBridge {
     }
     /** Running status, fragmented packets and interleaved real-time bytes. */
     private static final class Receiver extends MidiReceiver {
+        private final String deviceName;
+        Receiver(String deviceName) { this.deviceName = deviceName; }
         private final byte[] message = new byte[3];
         private int status, count, needed;
         @Override public void onSend(byte[] bytes, int offset, int length, long timestamp) {
@@ -94,7 +96,7 @@ final class HoneydewMidiBridge {
                     status = value; needed = (value >> 4 == 0xC || value >> 4 == 0xD) ? 1 : 2;
                 } else if (status != 0) {
                     message[0] = (byte) status; message[++count] = (byte) value;
-                    if (count == needed) { onMidiMessage(message, needed + 1); count = 0; }
+                    if (count == needed) { onMidiMessage(deviceName, message, needed + 1); count = 0; }
                 }
             }
         }
