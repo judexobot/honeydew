@@ -43,6 +43,8 @@ pub mod slicer;
 pub mod soundfont;
 mod spreader;
 pub mod supersaw;
+#[cfg(all(target_os = "android", feature = "surge-xt"))]
+pub mod surge_xt;
 mod tape_stop;
 pub mod three_osc;
 pub mod transistor_bass;
