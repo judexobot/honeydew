@@ -47,7 +47,7 @@ mod export;
 mod input;
 mod keys;
 mod midi;
-mod note_record;
+pub(crate) mod note_record;
 mod panel;
 mod plugins;
 mod tracks;
@@ -59,6 +59,9 @@ mod bundle_wait;
 pub(crate) mod live;
 // Audio files dropped on the app.
 mod file_drop;
+// The desktop's sound library: its install and the notice at start.
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+mod sounds;
 
 /// How long a flash (`Saved!`) shows.
 const FLASH_SECS: f64 = 1.5;
@@ -239,6 +242,9 @@ pub struct HoneydewApp {
     importing: Option<file_drop::Importing>,
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
     control: Option<control::Bridge>,
+    /// `Install sound library…` running (`app/sounds.rs`).
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    sounds: Option<crate::content::install::Job>,
 }
 
 impl Default for HoneydewApp {
@@ -319,13 +325,15 @@ impl Default for HoneydewApp {
             importing: None,
             #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
             control: None,
+            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+            sounds: None,
         }
     }
 }
 
 impl HoneydewApp {
     fn mcp_status(&self) -> &'static str {
-        #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+        #[cfg(desktop)]
         {
             if !self.settings.mcp_enabled {
                 "Disabled"
@@ -335,7 +343,7 @@ impl HoneydewApp {
                 "Error"
             }
         }
-        #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+        #[cfg(not(desktop))]
         {
             "Disabled"
         }
@@ -359,6 +367,8 @@ impl HoneydewApp {
             );
         }
         app.extract_demo_songs(cfg!(target_arch = "wasm32"));
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+        app.sounds_at_start();
         // Once per start, before the purge (whose end every move waits for): a folder of the songs folder named as a row
         // beside it (`My Songs/Demo Songs`) gets a free numbered name, so that it is listed, not hidden.
         if let Err(err) = crate::ui::main_menu::rename_shadowed_folders(&mut *app.files.library) {
@@ -438,6 +448,11 @@ impl HoneydewApp {
                 let on = self.audio.metronome_flag();
                 self.audio.send(AudioCommand::MetronomeFlag { on, level });
             }
+            if self.settings.rec_metronome != self.settings_saved.rec_metronome
+                && self.auto_record.armed
+            {
+                self.send_arm(true);
+            }
             if self.settings.low_latency != self.settings_saved.low_latency {
                 self.audio
                     .set_low_latency(&self.song, self.settings.low_latency);
@@ -449,7 +464,7 @@ impl HoneydewApp {
             if self.settings.multi_core != self.settings_saved.multi_core {
                 self.audio.set_multi_core(self.settings.multi_core);
             }
-            #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+            #[cfg(desktop)]
             if self.settings.mcp_enabled != self.settings_saved.mcp_enabled
                 || self.settings.mcp_port != self.settings_saved.mcp_port
             {
@@ -1075,8 +1090,8 @@ impl HoneydewApp {
         let notes = self.sounding(channel);
         let modules = (self.song.channels.get(channel)).map_or(&[][..], |c| &c.rack.modules);
         let range = (modules.iter())
-            .filter(|m| crate::ui::rack::instrument(m.type_id).is_some())
-            .map(|m| (m.file.key_low.max(0) as u8, m.file.key_high.max(0) as u8))
+            .filter_map(crate::ui::rack::key_range)
+            .map(|(low, high)| (low.max(0) as u8, high.max(0) as u8))
             .reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)));
         KeyInput {
             enabled: channel > 0,
@@ -1286,8 +1301,11 @@ impl HoneydewApp {
     }
 
     /// The value of `target` on `channel`: the song's, or for MIDI CC 1 (channel param 8) the MOD wheel's, which the
-    /// song does not keep.
+    /// song does not keep; the master's tempo param is the song's tempo ([`crate::song::tempo_value`]).
     pub(super) fn param_value(&self, channel: usize, target: AutomationTarget) -> Option<f32> {
+        if self.song.is_tempo(channel, target) {
+            return Some(crate::song::tempo_value(self.song.tempo_bpm));
+        }
         let ch = self.song.channels.get(channel)?;
         ch.param(target).or_else(|| {
             let cc1 = AutomationTarget {
@@ -1385,29 +1403,19 @@ impl HoneydewApp {
         let Some((channel, target, old, new)) = moved.filter(|_| !self.audio.counting_in()) else {
             return;
         };
-        let current = self.current_track().filter(|&(c, _)| c == channel);
-        let song = &mut self.song;
-        let current = current.map(|(_, lane)| lane);
-        let Some(added) =
-            (self.auto_record).record(song, channel, target, (old, new), tick, current)
-        else {
-            return;
-        };
-        if let Some(lane) = added {
-            // ponytail: a song copy per lane added (`lane_shifts` compares two songs); one per take and target at most.
-            let mut before = self.song.clone();
-            before.channels[channel].lanes.remove(lane);
-            self.rekey(&tracks::lane_shifts(&before, &self.song));
+        if self.record_point(channel, target, (old, new), tick) {
+            self.song_edited(SongEdit::Ongoing, tick);
         }
-        self.song_edited(SongEdit::Ongoing, tick);
     }
 
-    /// The engine's metronome follows REC's arm, and so does its song-end wrap: a recording does not wrap there. The
-    /// tempo dialog's metronome flag clicks too, on its own command (`AudioCommand::MetronomeFlag`).
+    /// The engine's metronome follows REC's arm unless `Metronome when recording` is off, and its song-end wrap
+    /// always does: a recording does not wrap there. The tempo dialog's metronome flag clicks too, on its own command
+    /// (`AudioCommand::MetronomeFlag`).
     fn send_arm(&mut self, on: bool) {
         self.auto_record.armed = on;
-        let level = self.settings.metronome_level;
-        self.audio.send(AudioCommand::Metronome { on, level });
+        let (click, level) = (self.settings.rec_metronome, self.settings.metronome_level);
+        self.audio
+            .send(AudioCommand::Metronome { on, click, level });
     }
 
     /// REC disarmed reaches the engine after the frame's takes (`audio_record`, `record_notes`) left their clips: the
@@ -1698,7 +1706,7 @@ impl HoneydewApp {
             let channel = channels.iter().position(|c| c.id == id)?;
             Some((channel, lane, clip))
         });
-        let clips = (self.note_record.clip(&self.song).into_iter())
+        let clips = (self.note_record.clips(&self.song).into_iter())
             .chain(self.midi_records.iter().filter_map(|r| r.clip(&self.song)))
             .chain(auto);
         let mut takes: Vec<LiveTake> = clips
@@ -1947,6 +1955,7 @@ impl HoneydewApp {
             self.main_screen.playing = false;
         }
         self.main_screen.takes = self.live_takes(snapshot.as_ref().map_or(0, |s| s.transport_tick));
+        self.slots.piano_roll.takes = self.main_screen.takes.clone();
         self.update_performance(ctx, snapshot.as_ref());
         // The playhead the editors draw this frame, smooth between the snapshot's block steps, never past where the
         // engine wraps: its loop's end, else the song length (not while REC is armed: a recording plays on).
@@ -1964,8 +1973,12 @@ impl HoneydewApp {
             .any(|o| matches!(o, Overlay::MainMenu(_) | Overlay::SaveDialog { .. }));
         let shows = self.main_screen.playing && self.preview.is_none() && !saving;
         self.recent_held &= ctx.input(|i| i.pointer.any_down());
+        let mut shown_bpm = self.song.tempo_bpm;
         if let Some(s) = snapshot.as_ref().filter(|_| shows) {
-            self.show_automation(s.transport_tick + self.audio.playhead_lead());
+            let tick = s.transport_tick + self.audio.playhead_lead();
+            self.show_automation(tick);
+            // The BPM button shows the tempo the master's tempo automation has set.
+            shown_bpm = self.automated_tempo(tick).unwrap_or(shown_bpm);
         }
         self.engine_keys = snapshot
             .as_ref()
@@ -1984,7 +1997,7 @@ impl HoneydewApp {
             theme: &self.theme,
             m: &metrics,
         };
-        let tracks = track_rows(&self.song);
+        let tracks = track_rows(&self.song, self.settings.show_hidden_tracks);
         let answer = self.nav.answer();
         // The piano's scroll and zoom are the current channel's.
         (self.main_screen).keys_for(self.song.channels.get(self.selected_channel).map(|c| c.id));
@@ -1994,6 +2007,7 @@ impl HoneydewApp {
             .is_some_and(|k| preview::current(self.nav.view, &self.slots, &self.song) == Some(k));
         let mcp_status = self.mcp_status();
         self.slots.ctrl_menu.recent = self.ctrl_recent();
+        self.slots.rack.recent = (self.recent_index()).map(|(c, t)| (self.song.channels[c].id, t));
         // The sample row's clip, found after the view.
         let mut row_clip = None;
         // SETTINGS' `Input device:` dropdown opened this frame.
@@ -2046,7 +2060,7 @@ impl HoneydewApp {
                     selected: self.selected_channel,
                     settings: &shown,
                     audio: snapshot.as_ref(),
-                    bpm: self.song.tempo_bpm,
+                    bpm: shown_bpm,
                     history: (self.history.can_undo(), self.history.can_redo()),
                     preview: self.preview,
                     can_preview: false,
@@ -2203,8 +2217,10 @@ impl HoneydewApp {
                 let escape = !self.nav.overlays.is_empty() && views::take_escape(ui);
                 // After the view, which makes its editor's state: SOLO CLIP shows while the current track has a
                 // current clip, in every view.
-                let current = (self.main_screen.clips).clip_for(app.song, *app.selected);
-                row_clip = sample_row::current(app.song, *app.selected, &self.slots.audio_editor);
+                let current = (self.main_screen.clips).current_clip(&app);
+                let show = app.settings.show_hidden_tracks;
+                row_clip =
+                    sample_row::current(app.song, *app.selected, &self.slots.audio_editor, show);
                 let row_slot = |key: ClipKey| key.clip(app.song)?.file.sample.as_deref();
                 let input = ScreenInput {
                     // As the view left it: the editor followed the playlist, or collapsed.
@@ -2488,7 +2504,8 @@ impl HoneydewApp {
             self.control_moved();
         }
         // The current track's current clip, whatever the view shows, after this frame's edits, undo and track change.
-        let current = (self.main_screen.clips).clip_for(&self.song, self.selected_channel);
+        let show = self.settings.show_hidden_tracks;
+        let current = (self.main_screen.clips).clip_for(&self.song, self.selected_channel, show);
         self.preview(ctx, actions.preview, current.map(ClipKey::from), tick);
         self.live_lane();
         // Channel params moved go into the undo history once no pointer is down and a burst of linked MIDI CC moves has
@@ -2521,6 +2538,8 @@ impl HoneydewApp {
         self.midi_import(ctx, tick);
         self.export_started(ctx);
         self.demo_restore(ctx);
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+        self.sounds(ctx, &metrics);
         self.burn_notes(ctx, tick);
         self.bundle_wait(ctx, tick);
         self.file_drop(ctx, &metrics, tick);
@@ -5909,8 +5928,9 @@ mod tests {
         ] {
             assert_eq!(rig.color_of(item), Some(dim), "{item}");
         }
-        // Standing on the CTRL button (x 669..725, on the panel's top), six rows of 1.25 U: a disabled item does nothing.
-        rig.click(pos2(697.0, PANEL_TOP - 2.5 * 40.0));
+        // Standing on the CTRL button (x 669..725, on the panel's top), seven rows of 1.25 U: a disabled item (`Add
+        // automation track`) does nothing.
+        rig.click(pos2(697.0, PANEL_TOP - 3.5 * 40.0));
         assert_eq!(rig.overlays(), [Overlay::CtrlMenu]);
         // A tap outside closes it and reaches nothing below.
         rig.click(E4);
