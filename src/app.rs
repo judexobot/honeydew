@@ -1110,11 +1110,21 @@ impl HoneydewApp {
         let midi = (self.midi.snapped.iter())
             .filter(|s| s.0 == channel)
             .map(|s| s.2);
+        // Mapped instruments (Gen / Game Boy APU) use the raw MIDI key. Standard
+        // instruments already have their key-locked note in `snapped`; don't
+        // light the original controller key as well as the snapped one.
         let mapped = self
             .midi
             .router
             .held_midi()
-            .filter(|(_, c)| *c == channel)
+            .filter(|&(key, c)| {
+                c == channel
+                    && !self
+                        .midi
+                        .snapped
+                        .iter()
+                        .any(|&(target, source, _)| target == c && source == key)
+            })
             .map(|(key, _)| key);
         (touched
             .chain(self.typed.notes(channel))
