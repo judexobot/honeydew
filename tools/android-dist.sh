@@ -44,7 +44,15 @@ cp THIRD_PARTY_NOTICES.md "$HONEYDEW_ANDROID_BUILD_DIR/assets/licenses/THIRD_PAR
 cp vendor/nuked-opn2/LICENSE "$HONEYDEW_ANDROID_BUILD_DIR/assets/licenses/Nuked-OPN2-LICENSE.txt"
 printf 'Corresponding source: https://github.com/judexobot/honeydew/tree/%s\n' "$(git rev-parse HEAD)" > "$HONEYDEW_ANDROID_BUILD_DIR/assets/licenses/SOURCE.txt"
 # signalsmith-stretch's C++ links libc++_shared.so, which the APK has to ship beside libhoneydew.so.
-cargo ndk -t arm64-v8a --platform 26 --link-libcxx-shared -o "$HONEYDEW_ANDROID_BUILD_DIR/jniLibs" rustc --release --locked --lib -- -C link-arg=-Wl,-z,max-page-size=16384
+if [ "${HONEYDEW_SURGE_XT:-0}" = "1" ]; then
+    [ -s "$HONEYDEW_ANDROID_BUILD_DIR/jniLibs/arm64-v8a/libhoneydew_surge_xt.so" ] || {
+        echo 'Missing original Surge XT C++ library; run tools/android-surge-xt.sh first' >&2
+        exit 1
+    }
+    cargo ndk -t arm64-v8a --platform 26 --link-libcxx-shared -o "$HONEYDEW_ANDROID_BUILD_DIR/jniLibs" rustc --release --locked --features surge-xt --lib -- -C link-arg=-Wl,-z,max-page-size=16384
+else
+    cargo ndk -t arm64-v8a --platform 26 --link-libcxx-shared -o "$HONEYDEW_ANDROID_BUILD_DIR/jniLibs" rustc --release --locked --lib -- -C link-arg=-Wl,-z,max-page-size=16384
+fi
 debug_keystore=$PWD/android/debug.keystore
 if [ "$variant" = debug ] && [ ! -f "$debug_keystore" ]; then
     # Keep the existing signing identity when moving it out of disposable build output.
@@ -69,7 +77,10 @@ import sys
 import zipfile
 
 with zipfile.ZipFile(sys.argv[1]) as apk:
-    for lib in ('libhoneydew.so', 'libc++_shared.so'):
+    native_libs = ['libhoneydew.so', 'libc++_shared.so']
+    if __import__('os').environ.get('HONEYDEW_SURGE_XT') == '1':
+        native_libs.append('libhoneydew_surge_xt.so')
+    for lib in native_libs:
         assert apk.getinfo('lib/arm64-v8a/' + lib).compress_type == zipfile.ZIP_STORED, lib
     assert apk.read('assets/content/CREDITS.txt'), 'missing sound credits'
     assert apk.read('assets/licenses/Nuked-OPN2-LICENSE.txt'), 'missing chip-core license'
