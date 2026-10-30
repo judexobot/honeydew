@@ -15,6 +15,12 @@ target_include_directories(honeydew_surge_xt PRIVATE
   "${CMAKE_BINARY_DIR}/generated"
 )
 target_link_libraries(honeydew_surge_xt PRIVATE surge-common)
+# Android's linker can otherwise emit an ELF with unresolved symbols,
+# causing dlopen(RTLD_NOW) to fail only when the user opens an instrument.
+# Diagnose those missing dependencies during GitHub Actions instead.
+if(ANDROID)
+  target_link_options(honeydew_surge_xt PRIVATE "-Wl,--no-undefined")
+endif()
 target_compile_features(honeydew_surge_xt PRIVATE cxx_std_20)
 set_target_properties(honeydew_surge_xt PROPERTIES
   OUTPUT_NAME "honeydew_surge_xt"
