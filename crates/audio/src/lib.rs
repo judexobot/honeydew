@@ -10,6 +10,7 @@ pub mod device;
 pub mod drums;
 pub mod dw_sampler;
 pub mod dwp;
+pub mod dynamic_eq;
 pub mod flac_writer;
 pub mod gameboy_apu;
 pub mod gameboy_instrument;
@@ -23,6 +24,7 @@ pub mod lemon;
 pub mod metronome;
 pub mod minisynth;
 pub mod mixer;
+pub mod modulator;
 pub mod mp3_writer;
 mod multiband;
 pub mod multifx;
@@ -107,6 +109,8 @@ pub fn effect_info(id: u16) -> Option<EffectInfo> {
         56 => ("Console Color", console_color::PARAM_COUNT),
         lemon::REVERB => ("Lemon Reverb", lemon::REVERB_MID_SIDE + 1),
         lemon::LIMITER => ("Lemon Limiter", lemon::LIMITER_SAFETY + 1),
+        dynamic_eq::DYNAMIC_EQ => ("Dynamic EQ", dynamic_eq::PARAMS),
+        modulator::MODULATOR => ("Modulator", modulator::PARAMS),
         _ => return None,
     };
     Some(EffectInfo {
@@ -114,6 +118,15 @@ pub fn effect_info(id: u16) -> Option<EffectInfo> {
         name,
         parameter_count,
     })
+}
+
+/// Whether module type `id`'s detector can read a sidechain key instead of its own input ([`AudioEffect::process_keyed`]):
+/// the Compressor, Gate, Limiter, Multiband Compressor, Lemon Limiter, Dynamic EQ and Modulator (its Envelope).
+pub fn takes_key(id: u16) -> bool {
+    matches!(
+        id,
+        8 | 27 | 28 | 36 | lemon::LIMITER | dynamic_eq::DYNAMIC_EQ | modulator::MODULATOR
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -503,6 +516,14 @@ impl AudioEffect {
                 let state = lemon::LimiterFx::new(sample_rate, &params);
                 (params, Processor::LemonLimiter(Box::new(state)))
             }
+            dynamic_eq::DYNAMIC_EQ => (
+                dynamic_eq::DEFAULTS.to_vec(),
+                Processor::DynamicEq(Box::default()),
+            ),
+            modulator::MODULATOR => (
+                modulator::DEFAULTS.to_vec(),
+                Processor::Modulator(Box::default()),
+            ),
             _ => return Err(EffectError::UnsupportedEffect(id)),
         };
         let mut effect = Self {
@@ -723,6 +744,17 @@ impl AudioEffect {
         self.meter
     }
 
+    /// A Modulator's offset for its target, normalized: Amount × its signal as its last block left it
+    /// ([`modulator`]); 0 while it is bypassed, and for any other effect.
+    pub fn modulation(&self) -> f32 {
+        match &self.processor {
+            Processor::Modulator(state) if self.common.runs(self.params[0] >= 0.5) => {
+                state.offset()
+            }
+            _ => 0.0,
+        }
+    }
+
     /// What the effect's panel draws from the audio besides the meter, in its type's layout ([`analysis`]); empty for
     /// an effect without one.
     pub fn analysis(&self) -> &[f32] {
@@ -744,7 +776,22 @@ impl AudioEffect {
         right: &mut [f32],
         context: ProcessContext,
     ) -> Result<(), EffectError> {
-        if left.len() != right.len() {
+        self.process_keyed(left, right, None, context)
+    }
+
+    /// [`Self::process`] with a sidechain: a module that [takes a key](takes_key) detects on `key` (left, right, as long
+    /// as the block) instead of its own input, while it still processes its input. Every other effect, an external one
+    /// included, ignores it.
+    pub fn process_keyed(
+        &mut self,
+        left: &mut [f32],
+        right: &mut [f32],
+        key: Option<(&[f32], &[f32])>,
+        context: ProcessContext,
+    ) -> Result<(), EffectError> {
+        let frames = left.len();
+        if right.len() != frames || key.is_some_and(|(l, r)| l.len() != frames || r.len() != frames)
+        {
             return Err(EffectError::MismatchedBuffers);
         }
         if !context.sample_rate.is_finite() || context.sample_rate <= 0.0 {
@@ -774,7 +821,7 @@ impl AudioEffect {
             state.prepare_block(context.tempo_bpm);
         }
         let mut peak = MeterSnapshot::default();
-        for (l, r) in left.iter_mut().zip(right.iter_mut()) {
+        for (frame, (l, r)) in left.iter_mut().zip(right.iter_mut()).enumerate() {
             let input = (*l, *r);
             if let Processor::VocalTune(state) = &mut self.processor {
                 let wet = state.process_frame(*l, *r);
@@ -785,7 +832,8 @@ impl AudioEffect {
                     wet
                 };
             } else if runs {
-                let wet = self.processor.process_frame(*l, *r);
+                let key = key.map(|(key_l, key_r)| (key_l[frame], key_r[frame]));
+                let wet = self.processor.process_frame_keyed(*l, *r, key);
                 (*l, *r) = self.common.frame((*l, *r), wet);
             }
             peak.peak_left = peak.peak_left.max(l.abs());
@@ -892,6 +940,8 @@ enum Processor {
     Waveshaper(WaveshaperState),
     LemonReverb(Box<lemon::ReverbFx>),
     LemonLimiter(Box<lemon::LimiterFx>),
+    DynamicEq(Box<dynamic_eq::DynamicEqState>),
+    Modulator(Box<modulator::ModulatorState>),
     Monitor,
 }
 
@@ -975,6 +1025,8 @@ impl Processor {
             }
             Self::LemonReverb(state) => state.set(params, sample_rate),
             Self::LemonLimiter(state) => state.set(params, sample_rate),
+            Self::DynamicEq(state) => state.refresh(params, sample_rate),
+            Self::Modulator(state) => state.refresh(params, sample_rate),
             Self::Monitor => {}
         }
     }
@@ -1004,6 +1056,7 @@ impl Processor {
             }
             Self::TapeStop(state) => state.prepare_block(context.tempo_bpm),
             Self::LemonReverb(state) => state.set_tempo(context.tempo_bpm),
+            Self::Modulator(state) => state.prepare_block(context),
             Self::Waveshaper(state) => {
                 state
                     .prepare_block(
@@ -1049,7 +1102,28 @@ impl Processor {
             Self::Waveshaper(state) => state.process_frame(l, r),
             Self::LemonReverb(state) => state.frame(l, r),
             Self::LemonLimiter(state) => state.frame(l, r),
+            // Its own input is the key until the sidechain feeds one.
+            Self::DynamicEq(state) => state.process_frame(l, r, (l, r)),
+            Self::Modulator(state) => state.process_frame(l, r, (l, r)),
             Self::Monitor => (l, r),
+        }
+    }
+
+    /// [`Self::process_frame`] with the detector of a processor that [takes a key](takes_key) reading `key` (left,
+    /// right) instead of the frame; every other processor ignores it.
+    fn process_frame_keyed(&mut self, l: f32, r: f32, key: Option<(f32, f32)>) -> (f32, f32) {
+        let Some(key) = key else {
+            return self.process_frame(l, r);
+        };
+        match self {
+            Self::Compressor(state) => state.keyed(l, r, key),
+            Self::LookaheadLimiter(state) => state.keyed(l, r, key),
+            Self::Gate(state) => state.keyed(l, r, key),
+            Self::Multiband(state) => state.keyed(l, r, Some(key)),
+            Self::LemonLimiter(state) => state.keyed(l, r, Some(key)),
+            Self::DynamicEq(state) => state.process_frame(l, r, key),
+            Self::Modulator(state) => state.process_frame(l, r, key),
+            _ => self.process_frame(l, r),
         }
     }
 
@@ -1089,6 +1163,8 @@ impl Processor {
             Self::Waveshaper(state) => state.reset(),
             Self::LemonReverb(state) => state.clear(),
             Self::LemonLimiter(state) => state.reset(),
+            Self::DynamicEq(state) => state.reset(),
+            Self::Modulator(state) => state.reset(),
             Self::Monitor => {}
         }
     }
@@ -1404,7 +1480,12 @@ impl CompressorState {
     }
 
     fn process_frame(&mut self, l: f32, r: f32) -> (f32, f32) {
-        let detector = l.abs().max(r.abs()) * self.detector_gain;
+        self.keyed(l, r, (l, r))
+    }
+
+    /// [`Self::process_frame`] detecting on `key` (left, right).
+    fn keyed(&mut self, l: f32, r: f32, (key_l, key_r): (f32, f32)) -> (f32, f32) {
+        let detector = key_l.abs().max(key_r.abs()) * self.detector_gain;
         if detector > self.held_peak {
             self.held_peak = detector;
             self.hold_remaining = self.hold_frames;
@@ -1604,9 +1685,16 @@ impl LookaheadLimiterState {
     }
 
     fn process_frame(&mut self, l: f32, r: f32) -> (f32, f32) {
+        self.keyed(l, r, (l, r))
+    }
+
+    /// [`Self::process_frame`] detecting on `key` (left, right), at the input gain too.
+    fn keyed(&mut self, l: f32, r: f32, (key_l, key_r): (f32, f32)) -> (f32, f32) {
         let in_left = l * self.input_gain;
         let in_right = r * self.input_gain;
-        let peak = in_left.abs().max(in_right.abs());
+        let peak = (key_l * self.input_gain)
+            .abs()
+            .max((key_r * self.input_gain).abs());
         let release_sine = if self.release_phase > 0.0 {
             let sine = (self.release_phase * std::f32::consts::FRAC_PI_2).sin();
             self.release_phase -= 1.0 / (self.sample_rate * self.release_seconds);
@@ -2269,6 +2357,9 @@ fn write_and_read(buffer: &mut [f32], write_index: usize, input: f32, delay: f32
 struct GateState {
     history: [[f32; 256]; 2],
     write_index: usize,
+    /// The detector's sums of squares (its own input's or the key's) since `write_index` last wrapped: each 256 frames'
+    /// level.
+    sums: [f32; 2],
     level_db: [f32; 2],
     phase: f32,
     gain: f32,
@@ -2290,6 +2381,7 @@ impl Default for GateState {
         Self {
             history: [[0.0; 256]; 2],
             write_index: 0,
+            sums: [0.0; 2],
             level_db: [-60.0; 2],
             phase: 0.0,
             gain: 0.0,
@@ -2331,16 +2423,19 @@ impl GateState {
     }
 
     fn process_frame(&mut self, l: f32, r: f32) -> (f32, f32) {
+        self.keyed(l, r, (l, r))
+    }
+
+    /// [`Self::process_frame`] detecting on `key` (left, right); the audio goes through the history.
+    fn keyed(&mut self, l: f32, r: f32, key: (f32, f32)) -> (f32, f32) {
         self.history[0][self.write_index] = l;
         self.history[1][self.write_index] = r;
+        self.sums[0] += key.0 * key.0;
+        self.sums[1] += key.1 * key.1;
         self.write_index = (self.write_index + 1) & 255;
         if self.write_index == 0 {
-            for channel in 0..2 {
-                let sum: f32 = self.history[channel]
-                    .iter()
-                    .map(|sample| sample * sample)
-                    .sum();
-                self.level_db[channel] = if sum <= 0.0 {
+            for (level, sum) in self.level_db.iter_mut().zip(std::mem::take(&mut self.sums)) {
+                *level = if sum <= 0.0 {
                     -60.0
                 } else {
                     10.0 * (sum / 256.0).log10()
@@ -2381,6 +2476,7 @@ impl GateState {
     fn reset(&mut self) {
         self.history = [[0.0; 256]; 2];
         self.write_index = 0;
+        self.sums = [0.0; 2];
         self.level_db = [-60.0; 2];
         self.phase = 0.0;
         self.gain = 0.0;
@@ -3187,6 +3283,61 @@ mod tests {
         for [peak, envelope, dry] in state.band_states() {
             assert_eq!((peak, envelope), (0.0, 0.0));
             assert_eq!(dry, 0.0);
+        }
+    }
+
+    #[test]
+    fn a_keyed_detector_reads_the_key_instead_of_the_input() {
+        // Each keyed type, set to act on a loud tone: keyed by a copy of its input it is the plain effect, keyed by
+        // silence it is not.
+        use lemon::dynamics::{COMP_RATIO, COMP_THRES};
+        let context = ProcessContext {
+            sample_rate: 48_000.0,
+            tempo_bpm: 120.0,
+            start_beat: 0.0,
+            playing: true,
+        };
+        let tone: Vec<f32> = (0..9_600).map(|i| 0.9 * (i as f32 * 0.05).sin()).collect();
+        let silence = vec![0.0; tone.len()];
+        let types: [(u16, &[(usize, f32)]); 5] = [
+            (8, &[(2, 1.0)]),
+            (27, &[]),
+            (28, &[(1, 1.0)]),
+            (
+                36,
+                &[
+                    (7, 0.0),
+                    (8, 1.0),
+                    (14, 0.0),
+                    (15, 1.0),
+                    (21, 0.0),
+                    (22, 1.0),
+                ],
+            ),
+            (
+                lemon::LIMITER,
+                &[(1 + COMP_THRES, 0.6), (1 + COMP_RATIO, 1.0)],
+            ),
+        ];
+        for (id, params) in types {
+            assert!(takes_key(id));
+            let run = |key: Option<&[f32]>| {
+                let mut effect = AudioEffect::new(id, 48_000.0).unwrap();
+                for &(index, value) in params {
+                    effect.set_parameter(index, value).unwrap();
+                }
+                let (mut left, mut right) = (tone.clone(), tone.clone());
+                for start in (0..tone.len()).step_by(512) {
+                    let block = start..(start + 512).min(tone.len());
+                    let key = key.map(|k| (&k[block.clone()], &k[block.clone()]));
+                    let (l, r) = (&mut left[block.clone()], &mut right[block]);
+                    effect.process_keyed(l, r, key, context).unwrap();
+                }
+                left
+            };
+            let plain = run(None);
+            assert_eq!(run(Some(&tone)), plain, "{id}");
+            assert_ne!(run(Some(&silence)), plain, "{id}");
         }
     }
 }
