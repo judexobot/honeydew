@@ -100,7 +100,8 @@ make -C "$LUA_SRC" clean
 make -C "$LUA_SRC" --jobs "${SURGE_BUILD_JOBS:-3}" amalg \
   BUILDMODE=static HOST_CC=cc TARGET_SYS=Linux \
   TARGET_CC="$LUA_CC" TARGET_STCC="$LUA_CC" TARGET_LD="$LUA_CC" \
-  TARGET_AR="$LUA_AR rcus" TARGET_CFLAGS="-fPIC -fvisibility=hidden"
+  TARGET_AR="$LUA_AR rcus" TARGET_STRIP="$TOOLBIN/llvm-strip" \
+  TARGET_CFLAGS="-fPIC -fvisibility=hidden"
 test -s "$LUA_SRC/libluajit.a"
 mkdir -p "$LUA_DST/bin" "$LUA_DST/include"
 cp "$LUA_SRC/libluajit.a" "$LUA_DST/bin/libluajit.a"
