@@ -26,7 +26,20 @@ import java.io.InputStream;
 import java.io.OutputStream;
 
 public final class HoneydewActivity extends NativeActivity {
-    static { System.loadLibrary("honeydew"); }
+    static {
+        // Preload Surge's original C++ DSP in Android's application ClassLoader
+        // namespace before Rust tries to resolve it with dlopen(). Dynamic
+        // module lookup can otherwise miss an APK-packaged native library.
+        // Ordinary Honeydew APKs without Surge XT still start normally.
+        try {
+            System.loadLibrary("honeydew_surge_xt");
+            android.util.Log.i("HoneydewSurgeXT", "Original Surge XT C++ DSP library preloaded");
+        } catch (UnsatisfiedLinkError e) {
+            android.util.Log.w("HoneydewSurgeXT",
+                    "Original Surge XT library could not be preloaded", e);
+        }
+        System.loadLibrary("honeydew");
+    }
 
     private HoneydewMidiBridge midiBridge;
     private static native void onRecordingPermission(boolean granted);
