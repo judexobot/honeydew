@@ -39,14 +39,14 @@ use crate::ui::{UiCtx, primary_down_live};
 /// Registers the module files of `fx` or `inst`, declared beside it as plain `mod` items (rustfmt does not follow a
 /// `mod` declared by a macro): `IDS`, `panel(id)` and, for the tests, `reference(id)`.
 macro_rules! modules {
-    ($($id:literal => $file:ident,)*) => {
+    ($($(#[$meta:meta])* $id:literal => $file:ident,)*) => {
         /// The type ids with a module file, in id order.
-        pub(super) const IDS: &[u16] = &[$($id),*];
+        pub(super) const IDS: &[u16] = &[$($(#[$meta])* $id),*];
 
         /// The panel of `type_id`, `None` while its file has none.
         pub(super) fn panel(type_id: u16) -> Option<super::Panel> {
             match type_id {
-                $($id => $file::panel(),)*
+                $($(#[$meta])* $id => $file::panel(),)*
                 _ => None,
             }
         }
@@ -55,7 +55,7 @@ macro_rules! modules {
         #[cfg(test)]
         pub(super) fn reference(type_id: u16) -> Option<&'static super::build::Reference> {
             match type_id {
-                $($id => Some(&$file::REFERENCE),)*
+                $($(#[$meta])* $id => Some(&$file::REFERENCE),)*
                 _ => None,
             }
         }
