@@ -9,10 +9,18 @@
 use crate::ProcessContext;
 use crate::instrument::Instrument;
 use std::ffi::{c_char, c_void, CStr, CString};
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::OnceLock;
 
 static DIAGNOSTIC: AtomicI32 = AtomicI32::new(0);
+static FIRST_NOTE_LOGGED: AtomicBool = AtomicBool::new(false);
+static FIRST_PCM_LOGGED: AtomicBool = AtomicBool::new(false);
+fn log_native(message: &'static [u8]) {
+    unsafe {
+        __android_log_write(4, b"HoneydewSurgeXT\0".as_ptr().cast(),
+                           message.as_ptr().cast());
+    }
+}
 /// 0: untested; 2: original DSP generated audible PCM; negative: failure.
 /// This status is shared with the Surge panel so silent engine failures are visible.
 pub fn diagnostic() -> i32 { DIAGNOSTIC.load(Ordering::Relaxed) }
@@ -49,8 +57,6 @@ type NoteOff = unsafe extern "C" fn(*mut c_void, u8, u8);
 type All = unsafe extern "C" fn(*mut c_void);
 type Cc = unsafe extern "C" fn(*mut c_void, u8, u8, u8);
 type Bend = unsafe extern "C" fn(*mut c_void, u8, i32);
-type Macro = unsafe extern "C" fn(*mut c_void, i32, f32);
-type NativeParam = unsafe extern "C" fn(*mut c_void, i32, f32);
 type FactoryPreset = unsafe extern "C" fn(*mut c_void, i32) -> i32;
 type Probe = unsafe extern "C" fn(f32) -> f32;
 type Render = unsafe extern "C" fn(*mut c_void, *mut f32, *mut f32, f64, f64, i32) -> i32;
@@ -65,8 +71,6 @@ struct Api {
     panic: All,
     cc: Cc,
     bend: Bend,
-    macro_value: Macro,
-    native_param: NativeParam,
     load_factory: FactoryPreset,
     probe: Probe,
     render: Render,
@@ -98,8 +102,6 @@ impl Api {
             panic: unsafe { symbol(handle, b"honeydew_surge_panic\0")? },
             cc: unsafe { symbol(handle, b"honeydew_surge_cc\0")? },
             bend: unsafe { symbol(handle, b"honeydew_surge_pitch_bend\0")? },
-            macro_value: unsafe { symbol(handle, b"honeydew_surge_macro\0")? },
-            native_param: unsafe { symbol(handle, b"honeydew_surge_native_param\0")? },
             load_factory: unsafe { symbol(handle, b"honeydew_surge_load_factory\0")? },
             probe: unsafe { symbol(handle, b"honeydew_surge_probe\0")? },
             render: unsafe { symbol(handle, b"honeydew_surge_render32\0")? },
@@ -107,6 +109,9 @@ impl Api {
         if result.is_none() {
             status(-2, "Surge XT shared library missing one or more C bridge symbols");
             let _ = unsafe { dlclose(handle) };
+        }
+        if result.is_some() {
+            log_native(b"Original Surge XT C++ DLL loaded and all preset-player symbols resolved\0");
         }
         result
     }
@@ -120,6 +125,8 @@ pub struct SurgeXt {
     left: [f32; BLOCK],
     right: [f32; BLOCK],
     position: usize,
+    notes_seen: bool,
+    silent_blocks: u32,
     // In preset-only mode there are no editor parameters to sync:
     // the original FXP owns all DSP settings and modulation assignments.
 }
@@ -151,6 +158,7 @@ impl SurgeXt {
             status(-5, &format!("Original Surge XT generated no PCM; probe peak={peak}"));
         } else {
             DIAGNOSTIC.store(2, Ordering::Relaxed);
+            log_native(b"Original Surge XT Init Saw probe produced nonzero PCM\0");
         }
         let instance = unsafe { (api.create)(sample_rate) };
         if instance.is_null() {
@@ -162,9 +170,12 @@ impl SurgeXt {
             status(-4, "Native Surge XT could not load the selected factory FXP patch");
             return Err("Original Surge XT factory preset could not be loaded");
         }
+        log_native(b"Original Surge XT factory FXP instantiated successfully\0");
         Ok(Self {
             api,
             instance,
+            notes_seen: false,
+            silent_blocks: 0,
             left: [0.0; BLOCK],
             right: [0.0; BLOCK],
             position: BLOCK,
@@ -173,6 +184,10 @@ impl SurgeXt {
 
     fn midi_on(&mut self, channel: u8, key: u8, velocity: f32) {
         let velocity = (velocity.clamp(0.0, 1.0) * 127.0).round().max(1.0) as u8;
+        self.notes_seen = true;
+        if !FIRST_NOTE_LOGGED.swap(true, Ordering::Relaxed) {
+            log_native(b"Honeydew MIDI note reached original Surge XT C++ engine\0");
+        }
         unsafe { (self.api.on)(self.instance, channel, key, velocity) };
     }
 
@@ -262,6 +277,24 @@ impl Instrument for SurgeXt {
                 if ok == 0 {
                     self.left.fill(0.0);
                     self.right.fill(0.0);
+                    if self.notes_seen {
+                        DIAGNOSTIC.store(-6, Ordering::Relaxed);
+                    }
+                }
+                if self.notes_seen {
+                    let audible = self.left.iter().chain(self.right.iter())
+                        .any(|s| s.is_finite() && s.abs() > 0.00001);
+                    if audible {
+                        if !FIRST_PCM_LOGGED.swap(true, Ordering::Relaxed) {
+                            log_native(b"Original Surge XT rendered audible PCM after Honeydew MIDI\0");
+                        }
+                        self.silent_blocks = 0;
+                    } else if self.silent_blocks < 512 {
+                        self.silent_blocks += 1;
+                        if self.silent_blocks == 512 {
+                            status(-7, "Surge XT received MIDI but rendered silence for 512 consecutive blocks");
+                        }
+                    }
                 }
                 self.position = 0;
             }
