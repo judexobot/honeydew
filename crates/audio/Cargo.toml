@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 
+[features]
+surge-xt = []
+
 [dependencies]
 rustfft = "6.4"
 blip_buf = "0.1.6"
