@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::metrics::{DEFAULT_UI_SCALE, UI_SCALE_FACTORS, UI_SCALE_RANGE};
 use crate::midi::device::ANY;
 use crate::theme::builtin_themes;
+use crate::ui::automation::value::ValueSnap;
 use crate::ui::keyboard_settings::KeyboardMode;
 use crate::ui::main_menu::Sort;
 use crate::ui::modules_browser::ModuleOrdering;
@@ -57,9 +58,9 @@ pub fn migrate_legacy_keys(storage: &mut dyn eframe::Storage) {
 ///
 /// FL Studio Mobile exposes buffer profiles on mobile builds, but its desktop builds expose the
 /// driver modes `Standard` and `Multitrack` instead.
-#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+#[cfg(desktop)]
 pub const SOUND_MODES: [(u8, &str); 2] = [(0, "STANDARD"), (1, "MULTITRACK")];
-#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+#[cfg(not(desktop))]
 pub const SOUND_MODES: [(u8, &str); 1] = [(3, "NATIVE")];
 
 /// Buffer-size slider positions. Zero keeps the audio device's native/default buffer;
@@ -67,9 +68,9 @@ pub const SOUND_MODES: [(u8, &str); 1] = [(3, "NATIVE")];
 pub const BUFFER_SIZES: [u32; 7] = [0, 64, 128, 256, 512, 1024, 2048];
 pub const MCP_DEFAULT_PORT: u16 = 57831;
 
-#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+#[cfg(desktop)]
 pub fn mcp_token_path() -> Option<std::path::PathBuf> {
-    #[cfg(target_os = "linux")]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| {
@@ -80,14 +81,14 @@ pub fn mcp_token_path() -> Option<std::path::PathBuf> {
         .map(|h| std::path::PathBuf::from(h).join("Library/Application Support"))?;
     #[cfg(target_os = "windows")]
     let base = std::env::var_os("APPDATA").map(std::path::PathBuf::from)?;
-    #[cfg(target_os = "linux")]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let app_dir = "honeydew";
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     let app_dir = "Honeydew";
     Some(base.join(app_dir).join("control-token"))
 }
 
-#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+#[cfg(desktop)]
 pub fn load_mcp_token() -> Option<String> {
     let token = std::fs::read_to_string(mcp_token_path()?)
         .ok()?
@@ -96,7 +97,7 @@ pub fn load_mcp_token() -> Option<String> {
     (!token.is_empty()).then_some(token)
 }
 
-#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+#[cfg(desktop)]
 pub fn save_mcp_token(token: &str) -> std::io::Result<()> {
     let path = mcp_token_path()
         .ok_or_else(|| std::io::Error::other("could not determine config directory"))?;
@@ -112,19 +113,19 @@ pub fn save_mcp_token(token: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+#[cfg(not(desktop))]
 pub fn load_mcp_token() -> Option<String> {
     None
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+#[cfg(not(desktop))]
 pub fn save_mcp_token(_token: &str) -> std::io::Result<()> {
     Err(std::io::Error::other("MCP token storage is desktop-only"))
 }
 
-#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+#[cfg(desktop)]
 const DEFAULT_SOUND_MODE: u8 = 0;
-#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+#[cfg(not(desktop))]
 const DEFAULT_SOUND_MODE: u8 = 3;
 
 /// Every SETTINGS value the app keeps. For the defaults see [`Settings::default`].
@@ -165,6 +166,10 @@ pub struct Settings {
     /// `Enable count-in when recording` (default on).
     #[serde(rename = "reccount")]
     pub count_in: bool,
+    /// `Metronome when recording` (our own key; default on): REC's take clicks the beats. Off, it records silently; a
+    /// count-in still clicks.
+    #[serde(rename = "recMetronome")]
+    pub rec_metronome: bool,
     /// `Metronome level` in [0, 1], shown as 0–100 %. Stored only.
     #[serde(rename = "mtmlevel")]
     pub metronome_level: f32,
@@ -195,6 +200,9 @@ pub struct Settings {
     /// `Continuous scrolling during playback`.
     #[serde(rename = "continuousScroll")]
     pub continuous_scroll: bool,
+    /// `Show hidden tracks` (our own key): the playlist shows the tracks `Hide track` hid, dimmed. Off by default.
+    #[serde(rename = "showHiddenTracks")]
+    pub show_hidden_tracks: bool,
     /// `Show CPU and RAM meters`.
     #[serde(rename = "showHardwareMeters")]
     pub hardware_meters: bool,
@@ -253,12 +261,28 @@ pub struct Settings {
     /// (`plugins::scan::default_folders`). Desktop only.
     #[serde(rename = "pluginFolders")]
     pub plugin_folders: Vec<String>,
+    /// The shipped sound release (`sounds/release.txt`) the desktop's missing-sounds question was last shown for (our
+    /// own key), "" before any: it shows again only for a newer one (`app/sounds.rs`).
+    #[serde(rename = "soundsNoticeSeen")]
+    pub sounds_notice_seen: String,
+    /// The automation editor's value snap (our own key): on, and its grid; on with `Rows` by default.
+    #[serde(rename = "automationValueSnap")]
+    pub automation_value_snap: ValueSnap,
+    /// The Save dialog's MIDI `Apply note effects` (our own key; #31): a MIDI export writes the notes as the channels'
+    /// note effects play them. On by default.
+    #[serde(rename = "midiApplyNoteEffects")]
+    pub midi_note_effects: bool,
+    /// The piano roll graph lane's value snap, `Vel`'s and `Pan`'s (our own keys; #32): off by default.
+    #[serde(rename = "pianoRollVelocitySnap")]
+    pub velocity_snap: ValueSnap,
+    #[serde(rename = "pianoRollPanSnap")]
+    pub pan_snap: ValueSnap,
 }
 
 impl Default for Settings {
-    /// The fresh-install state: ghost notes, range labels, the count-in and the CPU and RAM meters on, the latency
-    /// toggle unset (shown ON, compensating), the other toggles off, `NATIVE`, `Classic Gray` (the fallback theme),
-    /// `100 %` and `Animation` `Full`. The metronome level is half way; the drum pads are locked.
+    /// The fresh-install state: ghost notes, range labels, the count-in, the recording's metronome and the CPU and RAM
+    /// meters on, the latency toggle unset (shown ON, compensating), the other toggles off, `NATIVE`, `Classic Gray`
+    /// (the fallback theme), `100 %` and `Animation` `Full`. The metronome level is half way; the drum pads are locked.
     fn default() -> Self {
         Self {
             midi_device: ANY.to_owned(),
@@ -272,6 +296,7 @@ impl Default for Settings {
             latency_compensation: None,
             multitrack_recording: false,
             count_in: true,
+            rec_metronome: true,
             metronome_level: 0.5,
             theme: 0,
             ui_scale: DEFAULT_UI_SCALE,
@@ -282,6 +307,7 @@ impl Default for Settings {
             middle_c_is_c4: false,
             range_labels: true,
             continuous_scroll: false,
+            show_hidden_tracks: false,
             hardware_meters: true,
             lock_pads: true,
             last_audio_format: ExportFormat::Wav.id(),
@@ -297,6 +323,11 @@ impl Default for Settings {
             song_browser_ordering: Sort::AZ.id(),
             import_notice_accepted: false,
             plugin_folders: Vec::new(),
+            sounds_notice_seen: String::new(),
+            automation_value_snap: ValueSnap::default(),
+            midi_note_effects: true,
+            velocity_snap: ValueSnap::OFF,
+            pan_snap: ValueSnap::OFF,
         }
     }
 }
@@ -635,6 +666,7 @@ mod tests {
             latency_compensation: Some(false),
             multitrack_recording: !d.multitrack_recording,
             count_in: !d.count_in,
+            rec_metronome: !d.rec_metronome,
             metronome_level: 0.25,
             theme: 6,
             ui_scale: 145,
@@ -645,6 +677,7 @@ mod tests {
             middle_c_is_c4: !d.middle_c_is_c4,
             range_labels: !d.range_labels,
             continuous_scroll: !d.continuous_scroll,
+            show_hidden_tracks: !d.show_hidden_tracks,
             hardware_meters: !d.hardware_meters,
             lock_pads: !d.lock_pads,
             last_audio_format: 5,
@@ -660,6 +693,20 @@ mod tests {
             song_browser_ordering: 2,
             import_notice_accepted: !d.import_notice_accepted,
             plugin_folders: vec!["/plugins".into()],
+            sounds_notice_seen: "0.1.4".into(),
+            automation_value_snap: ValueSnap {
+                on: false,
+                grid: crate::ui::automation::value::ValueGrid::Percent(10),
+            },
+            midi_note_effects: !d.midi_note_effects,
+            velocity_snap: ValueSnap {
+                on: true,
+                grid: crate::ui::automation::value::ValueGrid::Steps,
+            },
+            pan_snap: ValueSnap {
+                on: true,
+                grid: crate::ui::automation::value::ValueGrid::Percent(25),
+            },
         }
     }
 
@@ -667,7 +714,9 @@ mod tests {
     fn defaults_are_the_device_state() {
         let d = Settings::default();
         // The rows that default on, and the count-in.
-        assert!(d.ghost_notes && d.range_labels && d.hardware_meters && d.count_in);
+        assert!(
+            d.ghost_notes && d.range_labels && d.hardware_meters && d.count_in && d.rec_metronome
+        );
         // The latency toggle is unset: shown ON, and it compensates.
         assert_eq!(d.latency_compensation, None);
         // The other toggles are off.
@@ -856,6 +905,7 @@ mod tests {
                 "ModuleBrowserOrdering",
                 "SongBrowserOrdering",
                 "SoundFontPatchOrdering",
+                "automationValueSnap",
                 "bgAudio",
                 "continuousScroll",
                 "demoSongsVersion",
@@ -870,20 +920,26 @@ mod tests {
                 "mcpEnabled",
                 "mcpPort",
                 "middlec4",
+                "midiApplyNoteEffects",
                 "mtmlevel",
                 "multithreaded",
                 "multitrackrec",
+                "pianoRollPanSnap",
+                "pianoRollVelocitySnap",
                 "pluginFolders",
                 "preferredKbdSizeCells",
+                "recMetronome",
                 "reccount",
                 "recentKbdSizeCells",
                 "reclatency",
                 "showHardwareMeters",
+                "showHiddenTracks",
                 "showKeyNames",
                 "showRangeIndexLabels",
                 "showTwoRows",
                 "showWheels",
                 "soundModeAndr",
+                "soundsNoticeSeen",
                 "theme",
                 "uiscalefactor",
                 "whatsNewSeen"

@@ -33,6 +33,7 @@ use eframe::egui::{
 };
 use honeydew_audio::drums::SPEED;
 
+use crate::app::note_record;
 use crate::metrics::{FontSize, Metrics};
 use crate::project_files::ProjectFiles;
 use crate::sample_cache::{self, SampleCache, Waveform};
@@ -66,6 +67,9 @@ const MARQUEE_U: f32 = 3.0;
 const MARQUEE_ALPHA: f32 = 0.2;
 /// The floating row's pop-in: a ← 0.6·a per frame.
 const ROW_POP: f32 = 0.6;
+/// A hidden track's row, which Settings `Show hidden tracks` shows: `background` at this alpha over its header and clips,
+/// under the playhead and the selection.
+pub(crate) const HIDDEN_VEIL: f32 = 0.6;
 
 /// The side of the square a touch held on empty grid grows, `elapsed` seconds after its touch-down: 3 U·k,
 /// k = clamp(4.4333·elapsed − 0.33, 0, 1). It shows from about 74 ms and is 3 U at 300 ms.
@@ -263,7 +267,8 @@ impl From<ClipKey> for ClipRef {
 }
 
 /// A take being recorded: its channel, its track and its span in song ticks, which grows as the take does. `clip`: the
-/// clip it records into, which shows only as this bar meanwhile; an audio take has none until it stops.
+/// clip it records into, which shows only as this bar meanwhile (a notes or drums take's with its notes live, a
+/// Honeydew addition: [`paint_live`]); an audio take has none until it stops.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LiveTake {
     pub channel: usize,
@@ -459,8 +464,9 @@ impl Clips {
     /// Draws and edits the clips of the visible track rows. `rows` gives each row's channel, lane and lane rect; `grid`
     /// is the area right of the track headers, which clips are clipped to. While Preview plays `preview` alone, every
     /// other clip is dimmed as a muted one. The `takes` being recorded show over the clips as live bars
-    /// ([`paint_take`]). Song edits are reported through `app.song_edited`; a clip's `Edit`, or a double tap on it,
-    /// returns its editor's navigation, as does `New Clip` on an audio track (the sample picker). The insert menu,
+    /// ([`paint_take`]), a notes or drums take's clip with its notes as they record ([`paint_live`], Honeydew's own).
+    /// Song edits are reported through `app.song_edited`; a clip's `Edit`, or a double tap on it, returns its editor's
+    /// navigation, as does `New Clip` on an audio track (the sample picker). The insert menu,
     /// `Copy` and `Snap` round to `snap`'s unit (round(beat/unit)·unit), and drags too while it is on (whole ticks
     /// while off).
     #[allow(clippy::too_many_arguments)]
@@ -479,11 +485,35 @@ impl Clips {
         let auto = grid_ticks(axis, sig, m);
         let (snap, drag_unit) = (snap.grid(auto, sig), snap.active(auto, sig).unwrap_or(1.0));
         let bar = app.song.time_sig.bar_beats();
-        // A clip that went away (undo, another song) takes its selection and gesture with it.
-        if self.selected.is_some_and(|r| find(app.song, r).is_none()) {
+        // A clip that went away (undo, another song), or whose track no longer shows (`Hide track`), takes its selection
+        // and gesture with it.
+        let show = app.settings.show_hidden_tracks;
+        let kept = |r: ClipRef| {
+            find(app.song, r).is_some()
+                && (show || !app.song.channels[r.channel].lanes[r.lane].hidden)
+        };
+        if self.selected.is_some_and(|r| !kept(r)) {
             self.deselect();
         }
-        self.group.retain(|&r| find(app.song, r).is_some());
+        self.group.retain(|&r| kept(r));
+        // A current track or grid cursor whose track no longer shows moves to the nearest track that does (the one below
+        // on a tie): `paste` and `Add clip` go there.
+        if !show {
+            let all = track_rows(app.song, true);
+            let hidden = |t: (usize, usize)| {
+                (all.iter().position(|r| (r.channel, r.lane) == t)).filter(|&p| all[p].hidden)
+            };
+            if let Some(p) = hidden(self.track_for(*app.selected)) {
+                let near = (all.iter().enumerate().filter(|(_, r)| !r.hidden))
+                    .min_by_key(|&(i, _)| (i.abs_diff(p), i < p));
+                if let Some((_, r)) = near {
+                    self.set_track(app.selected, r.channel, r.lane);
+                }
+            }
+            if self.cursor.is_some_and(|(_, t)| hidden(t).is_some()) {
+                self.cursor = None;
+            }
+        }
         if self.group.len() == 1 {
             self.selected = self.group.pop();
         }
@@ -565,7 +595,7 @@ impl Clips {
         // The current clip's outline goes over every row and clip, after them all ([`paint_outline`]).
         let mut outline = None;
         for &(r, rect) in &blocks {
-            // A clip being recorded shows only as its take's live bar.
+            // A clip being recorded shows only as its take's live bar (with its notes live: [`paint_live`]).
             let live =
                 |t: &LiveTake| (t.channel, t.lane, t.clip) == (r.channel, r.lane, Some(r.id));
             if let Some(clip) = find(app.song, r).filter(|_| !takes.iter().any(live)) {
@@ -611,10 +641,32 @@ impl Clips {
             if let (Some(&(.., row)), Some(channel)) = (row, app.song.channels.get(take.channel)) {
                 let x = axis.x(take.start)..=axis.x(take.end);
                 let rect = Rect::from_x_y_ranges(x, row.y_range());
-                paint_take(&painter, &app.cx, channel, rect);
+                let lane = &channel.lanes[take.lane];
+                let clip = (take.clip)
+                    .filter(|_| matches!(lane.kind, LaneKind::Notes | LaneKind::Drums))
+                    .and_then(|id| lane.clips.iter().find(|c| c.id == id));
+                match clip {
+                    Some(clip) => {
+                        let clip = note_record::live(clip, take.end as u64, bar);
+                        paint_live(&painter, &app.cx, channel, lane, &clip, rect, axis);
+                    }
+                    None => paint_take(&painter, &app.cx, channel, rect),
+                }
             }
         }
 
+        // A hidden track's clips (Settings `Show hidden tracks`), dimmed under the playhead and the selection.
+        let veil = (app.cx.theme.colors.background.to_color32()).gamma_multiply(HIDDEN_VEIL);
+        for &(channel, lane, row) in rows {
+            let track = app
+                .song
+                .channels
+                .get(channel)
+                .and_then(|c| c.lanes.get(lane));
+            if track.is_some_and(|l| l.hidden) {
+                painter.rect_filled(row, 0.0, veil);
+            }
+        }
         if let Some((b, dimmed)) = outline {
             paint_outline(&painter, &app.cx, b, dimmed);
         }
@@ -622,7 +674,7 @@ impl Clips {
         // The selection overlay: one pulsing `text` box over every selected clip, gaps included, no outline. While a
         // marquee is live it is the only box drawn: the selection shows on its release; its frame still takes touches
         // and places the floating row.
-        let selection = selection_box(app.song, &self.targets(), rows, axis, 1.0 / m.ppp());
+        let selection = selection_box(app.song, &self.targets(), rows, axis, 1.0 / m.ppp(), show);
         let sbox = selection.filter(|_| self.marquee.is_none());
         paint_pulse(&painter, &app.cx, sbox, m.u(CORNER), &mut self.pulse);
         // A touch-down in the group's frame acts on the group whole; in a quiet group's, only one on its clips.
@@ -801,7 +853,7 @@ impl Clips {
             grid,
             map: [
                 axis.origin,
-                list_top(app.song, rows, 1.0 / m.ppp()),
+                list_top(app.song, rows, 1.0 / m.ppp(), show),
                 axis.beat_w,
                 row.height(),
             ],
@@ -852,22 +904,22 @@ impl Clips {
         (self.track.filter(|t| t.0 == keys || t.0 == 0)).unwrap_or((keys, 0))
     }
 
-    /// The current clip: the current track's own (each track keeps one, its lane's DESc@24), while it exists. It is
-    /// drawn as current, and the bottom editor shows it (the app; it collapses whenever the current track has none).
+    /// The current clip: the current track's own (each track keeps one, its lane's DESc@24), while it exists and its
+    /// track shows. It is drawn as current, and the bottom editor shows it (the app; it collapses whenever the current
+    /// track has none, so a track hidden under it closes it).
     pub(crate) fn current_clip(&self, app: &AppCtx) -> Option<ClipRef> {
-        self.clip_for(app.song, *app.selected)
+        self.clip_for(app.song, *app.selected, app.settings.show_hidden_tracks)
     }
 
-    /// [`Self::current_clip`] in `song` with channel `keys` on the keyboard.
-    pub(crate) fn clip_for(&self, song: &Song, keys: usize) -> Option<ClipRef> {
+    /// [`Self::current_clip`] in `song` with channel `keys` on the keyboard; a hidden track has one only with
+    /// `show_hidden` (Settings `Show hidden tracks`).
+    pub(crate) fn clip_for(&self, song: &Song, keys: usize, show_hidden: bool) -> Option<ClipRef> {
         let (channel, lane) = self.track_for(keys);
-        let id = song
-            .channels
-            .get(channel)?
-            .lanes
-            .get(lane)?
-            .file
-            .current_clip_id;
+        let track = song.channels.get(channel)?.lanes.get(lane)?;
+        let id = track.file.current_clip_id;
+        if track.hidden && !show_hidden {
+            return None;
+        }
         let r = ClipRef { channel, lane, id };
         find(song, r).map(|_| r)
     }
@@ -981,7 +1033,9 @@ impl Clips {
             }
             EditKey::Cut | EditKey::Delete => {}
             EditKey::Paste => {
-                let pasted = paste_clips(app.song, &self.clipboard, tick, (channel, lane), snap);
+                let show = app.settings.show_hidden_tracks;
+                let pasted =
+                    paste_clips(app.song, &self.clipboard, tick, (channel, lane), snap, show);
                 if !pasted.is_empty() {
                     self.set_selection(pasted);
                     app.song_edited(true);
@@ -1191,7 +1245,9 @@ impl Clips {
                 }
             }
             Some(Tap::Button(_)) => {
-                let pasted = paste_clips(app.song, &self.clipboard, tick, (channel, lane), snap);
+                let show = app.settings.show_hidden_tracks;
+                let pasted =
+                    paste_clips(app.song, &self.clipboard, tick, (channel, lane), snap, show);
                 if !pasted.is_empty() {
                     self.set_selection(pasted);
                     app.song_edited(true);
@@ -1280,7 +1336,7 @@ impl Clips {
         // The rows first: the spans below go to the clips where they are now.
         let mut moved = false;
         if let (Part::Body, Some(pos)) = (drag.part, pos) {
-            let tracks = track_rows(app.song);
+            let tracks = track_rows(app.song, app.settings.show_hidden_tracks);
             let index = |y: f32| {
                 let row = rows.iter().min_by(|a, b| {
                     let d = |r: &&(usize, usize, Rect)| (r.2.center().y - y).abs();
@@ -1353,7 +1409,7 @@ impl Clips {
     /// moved.
     // ponytail: the lone clip's nearest track may be scrolled out; restrict it to the shown rows if that shows.
     fn drag_rows(&mut self, app: &mut AppCtx, drag: &mut Drag, want: isize) -> bool {
-        let tracks = track_rows(app.song);
+        let tracks = track_rows(app.song, app.settings.show_hidden_tracks);
         let index =
             |r: ClipRef| (tracks.iter()).position(|t| (t.channel, t.lane) == (r.channel, r.lane));
         let homes: Option<Vec<(ClipRef, usize, usize)>> = (drag.clips.iter())
@@ -1572,12 +1628,13 @@ impl Clips {
 
 /// The track list's scroll, as the screen y where its first row (the master's, scrolled out or not) starts: the
 /// first of the visible `rows` less the rows above it. A scroll by whole rows moves it too, and a selection that
-/// moves between rows does not. `px` is the device pixel of gap that the rows' rects leave out under each row.
-fn list_top(song: &Song, rows: &[(usize, usize, Rect)], px: f32) -> f32 {
+/// moves between rows does not. `px` is the device pixel of gap that the rows' rects leave out under each row; with
+/// `show_hidden` the hidden tracks are rows ([`track_rows`]).
+fn list_top(song: &Song, rows: &[(usize, usize, Rect)], px: f32, show_hidden: bool) -> f32 {
     let Some(&(channel, lane, first)) = rows.first() else {
         return 0.0;
     };
-    let above = (track_rows(song).iter())
+    let above = (track_rows(song, show_hidden).iter())
         .take_while(|t| (t.channel, t.lane) != (channel, lane))
         .count();
     first.top() - above as f32 * pitch(rows, px)
@@ -1601,8 +1658,10 @@ fn selection_box(
     rows: &[(usize, usize, Rect)],
     axis: TimeAxis,
     px: f32,
+    show_hidden: bool,
 ) -> Option<Rect> {
-    let (tracks, top, pitch) = (track_rows(song), list_top(song, rows, px), pitch(rows, px));
+    let tracks = track_rows(song, show_hidden);
+    let (top, pitch) = (list_top(song, rows, px, show_hidden), pitch(rows, px));
     (sel.iter())
         .filter_map(|&r| {
             let clip = find(song, r)?;
@@ -2095,6 +2154,32 @@ fn paint_take(painter: &Painter, cx: &UiCtx, channel: &Channel, rect: Rect) {
     painter.rect_filled(b.shrink2(vec2(0.0, 3.0 * px)), r, content.to_color32());
 }
 
+/// A notes or drums take's clip being recorded, `clip` as it shows live ([`note_record::live`]), its block `rect`
+/// running from its start to the song position: issue #26 (a plain recording clip draws only the live
+/// bar). The bar ([`paint_take`]), so it still reads as a recording, then over its content-colour box the notes or hits
+/// in the channel colour, laid out as the clip's miniature is in [`paint_clip`] (the same content rect), so they stay
+/// where they are once the take ends; held ones reach the playhead.
+fn paint_live(
+    painter: &Painter,
+    cx: &UiCtx,
+    channel: &Channel,
+    lane: &Lane,
+    clip: &Clip,
+    rect: Rect,
+    axis: TimeAxis,
+) {
+    paint_take(painter, cx, channel, rect);
+    let (b, m) = (clip_box(rect, cx.m), cx.m);
+    let area = Rect::from_x_y_ranges(
+        b.x_range(),
+        b.top() + m.u(NAME_H)..=b.bottom() - CONTENT_END_T * m.t(),
+    );
+    let steps = lane.kind == LaneKind::Drums && lane.grid == DrumGrid::Steps;
+    let ink = channel_color(channel.hue, cx.theme).to_color32();
+    let body = painter.with_clip_rect(painter.clip_rect().intersect(b));
+    notes(&body, clip, steps, area, axis, |_| ink, m);
+}
+
 /// A clip's name (DESc@28): an automation lane's custom label, else its auto name (`<Param> : <Module>`, `Level`); an
 /// audio lane's clip its sample's name (MAIN@12, the file name); the channel name for any other lane, or when those
 /// are empty.
@@ -2271,9 +2356,9 @@ fn notes(
         return;
     };
     let seen = painter.clip_rect();
-    // A note that starts before the view reaches into it by its width.
-    // ponytail: at most a view's width; a note longer than that, starting further before the view, is left out.
-    let longest = widest.min(seen.width());
+    // A note that starts before the view reaches into it by its width, at most a loop pass: it is cut at its pass's end.
+    // A held note of a take outgrows the view as it records, and stays drawn while any of it shows (issue #26).
+    let longest = widest.min((lp / f64::from(PPQ)) as f32 * axis.beat_w);
     let start = f64::from(clip.start_tick);
     let from = axis.tick(seen.left() - longest).max(start);
     let to = axis.tick(seen.right()).min(end_tick(clip)).ceil();
@@ -2535,13 +2620,15 @@ pub fn copy_clip(lane: &mut Lane, id: u32, grid: f64) -> Option<u32> {
 
 /// `paste` (as the automation editor's Paste): the earliest of `clips` lands on the grid line nearest `tick`,
 /// the others keep their offsets from it. A lone clip goes on `track` when that is a track of its kind, else each goes
-/// back on its own track; a track that is gone or of another kind takes nothing. Returns the copies (new ids).
+/// back on its own track; a track that is gone or of another kind takes nothing, nor does a hidden one (`Hide track`)
+/// unless `show_hidden` (Settings `Show hidden tracks`). Returns the copies (new ids).
 pub fn paste_clips(
     song: &mut Song,
     clips: &[(ClipRef, LaneKind, Clip)],
     tick: f64,
     (channel, lane): (usize, usize),
     grid: f64,
+    show_hidden: bool,
 ) -> Vec<ClipRef> {
     let Some(first) = clips.iter().map(|c| c.2.start_tick).min() else {
         return Vec::new();
@@ -2554,7 +2641,8 @@ pub fn paste_clips(
             true => (channel, lane),
             false => (r.channel, r.lane),
         };
-        let Some(target) = lane_mut(song, c, l).filter(|t| t.kind == *k) else {
+        let fits = |t: &&mut Lane| t.kind == *k && (show_hidden || !t.hidden);
+        let Some(target) = lane_mut(song, c, l).filter(fits) else {
             continue;
         };
         let mut copy = clip.clone();
@@ -2676,12 +2764,24 @@ pub fn unlink_loop(clip: &mut Clip) -> bool {
         return false;
     }
     let start = u64::from(clip.start_tick);
-    let events = clip
-        .events_in_song_range(start, end_tick(clip).ceil() as u64)
+    let plays = || clip.events_in_song_range(start, end_tick(clip).ceil() as u64);
+    let events = plays()
         .map(|(tick, e)| at_pos(*e, (tick - start) as u32))
         .collect();
+    // An automation point's segment shape goes with each of its plays.
+    let mut shapes: Vec<_> = (plays())
+        .filter_map(|(tick, e)| match *e {
+            Event::Automation { pos, control, .. } if control => Some((
+                (tick - start) as u32,
+                crate::song::points::shape_at(clip, pos),
+            )),
+            _ => None,
+        })
+        .filter(|s| s.1 != Default::default())
+        .collect();
+    shapes.dedup_by_key(|s| s.0);
     let visible = clip.visible_ticks() / f64::from(PPQ);
-    clip.events = events;
+    (clip.events, clip.file.shapes) = (events, shapes);
     (
         clip.loop_len_beats,
         clip.visible_len_beats,
@@ -3044,7 +3144,7 @@ mod tests {
         for _ in 0..4 {
             song.add_channel(ChannelKind::Synth(SynthKind::MiniSynth));
         }
-        let tracks = track_rows(&song);
+        let tracks = track_rows(&song, false);
         let (top, view_h, pitch) = (100.0_f32, 32.0_f32, 64.0_f32);
         let list_top_at = |scroll: f32| {
             let first = (scroll / pitch).floor() as usize;
@@ -3057,7 +3157,7 @@ mod tests {
                     (tracks[i].channel, tracks[i].lane, rect)
                 })
                 .collect();
-            list_top(&song, &rows, 1.0)
+            list_top(&song, &rows, 1.0, false)
         };
         // At 63 row 0 is first and row 1 is below it; at 64 row 1 is alone. The list's top still moves by the point.
         assert_ne!(list_top_at(63.0), list_top_at(64.0));
@@ -4309,7 +4409,7 @@ mod tests {
     }
 
     #[test]
-    fn the_miniature_looks_back_at_most_a_view_width_for_long_notes() {
+    fn the_miniature_looks_back_a_loop_pass_for_long_notes() {
         // A 4-tick loop over a million beats with a note a million beats long, scrolled to beat 500 000: looking back
         // by the note's length walked every pass from the clip start, 1.6e7 a frame.
         let mut lane = Lane::new(LaneKind::Notes);
@@ -4332,8 +4432,31 @@ mod tests {
         let view = Rect::from_x_y_ranges(0.0..=128.0, 0.0..=48.0);
         let fills = (miniature_fills(clip.clone(), area, view, axis, m).map(|f| f.len()))
             .expect("painted within 5 s");
-        // The view and a view's width before it: 1024 ticks, a play every 4.
-        assert!((200..=300).contains(&fills), "{fills}");
+        // The view and one pass before it: 516 ticks, a play every 4.
+        assert!((120..=140).contains(&fills), "{fills}");
+        // A 64-beat clip with one 64-beat note (a held note as a take records), scrolled to beats 40 to 44: the note
+        // starts 40 beats before the view, ten views' widths, and is still drawn across it.
+        let mut lane = Lane::new(LaneKind::Notes);
+        let clip = lane.add_clip(0, 64.0);
+        clip.visible_len_beats = 64.0;
+        clip.events = vec![Event::Note {
+            pos: 0,
+            len_beats: 64.0,
+            key: 60,
+            velocity: Event::DEFAULT_VELOCITY,
+            pan: Event::DEFAULT_PAN,
+            slide: false,
+        }];
+        let axis = TimeAxis {
+            origin: -1280.0,
+            beat_w: 32.0,
+        };
+        let area = Rect::from_x_y_ranges(axis.x(0.0)..=axis.x(64.0 * f64::from(PPQ)), 0.0..=48.0);
+        let fills = miniature_fills(clip.clone(), area, view, axis, m).expect("painted within 5 s");
+        assert!(
+            fills.iter().any(|r| r.left() < 0.0 && r.right() > 128.0),
+            "{fills:?}"
+        );
     }
 
     #[test]
@@ -4744,18 +4867,18 @@ mod tests {
             lane: 0,
             id: 1,
         };
-        let b = selection_box(&song, &[r(0), r(2)], &rows, AXIS, 1.0);
+        let b = selection_box(&song, &[r(0), r(2)], &rows, AXIS, 1.0, false);
         assert_eq!(
             b,
             Some(Rect::from_min_max(pos2(164.0, 48.0), pos2(420.0, 240.0)))
         );
         // One clip: its start to its end across its own row.
-        let b = selection_box(&song, &[r(2)], &rows, AXIS, 1.0);
+        let b = selection_box(&song, &[r(2)], &rows, AXIS, 1.0, false);
         assert_eq!(
             b,
             Some(Rect::from_min_max(pos2(292.0, 176.0), pos2(420.0, 240.0)))
         );
-        assert_eq!(selection_box(&song, &[], &rows, AXIS, 1.0), None);
+        assert_eq!(selection_box(&song, &[], &rows, AXIS, 1.0, false), None);
     }
 
     #[test]
