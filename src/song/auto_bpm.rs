@@ -95,7 +95,7 @@ mod tests {
             }),
         );
         assert_eq!(clip.file.unknown_chunks.len(), 1);
-        assert_eq!(read(clip).unwrap().embedded, true);
+        assert!(read(clip).unwrap().embedded);
         write(clip, None);
         assert_eq!(read(clip), None);
         assert!(clip.file.unknown_chunks.is_empty());
