@@ -35,6 +35,10 @@ jobs:
           sudo apt-get install -y cmake ninja-build clang libclang-dev libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
       - name: Original core, all 641 FXPs, reference PCM and Honeydew mixer
         run: bash tools/surge-xt-test.sh
+      - name: Vocal correction, formants, retune and callback allocation regressions
+        run: |
+          cargo test -p honeydew-audio --locked --test vocal_tune --test vocal_tune_spectral --test pitcher --test pitcher2
+          cargo test -p honeydew-audio --locked --test rt_alloc vocal_tune_and_gameboy_callbacks_allocate_nothing
       - name: Other instrument and application regressions
         if: matrix.runner == 'ubuntu-24.04'
         run: cargo test --workspace --lib --locked

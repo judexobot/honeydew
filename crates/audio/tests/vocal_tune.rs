@@ -1,5 +1,23 @@
 use honeydew_audio::vocal_tune::{Parameters, Scale, VocalTune};
 use std::f32::consts::TAU;
+#[test]
+fn vocal_range_tracking_remains_accurate_across_device_rates() {
+    for rate in [8_000, 44_100, 48_000, 96_000] {
+        for hz in [55.0, 82.41, 220.0, 440.0, 880.0, 1200.0, 1480.0] {
+            let mut fx = VocalTune::new(rate).unwrap();
+            for n in 0..rate / 5 {
+                let x = 0.3 * (TAU * hz * n as f32 / rate as f32).sin();
+                fx.process_frame(x, x);
+            }
+            let actual = fx.detected_hz().expect("voiced vocal range");
+            let cents = 1200.0 * (actual / hz).log2();
+            assert!(
+                cents.abs() < 10.0,
+                "rate={rate}, input={hz}, detected={actual}, cents={cents}"
+            );
+        }
+    }
+}
 fn tone(hz: f32, rate: u32, seconds: f32, p: Parameters) -> (VocalTune, Vec<f32>) {
     let mut fx = VocalTune::new(rate).unwrap();
     fx.set_parameters(p);
@@ -73,6 +91,30 @@ fn shifted_output_is_a4_in_both_profiles() {
             },
         );
         assert!((peak(&audio, 440.0, 48000) - 440.0).abs() < 1.5);
+    }
+}
+#[test]
+fn an_in_tune_high_note_is_not_detuned_by_the_tracker() {
+    for studio in [false, true] {
+        let (fx, audio) = tone(
+            880.0,
+            8000,
+            2.0,
+            Parameters {
+                retune_ms: 2.0,
+                hard_tune: true,
+                protect_sibilants: 0.0,
+                studio,
+                ..Default::default()
+            },
+        );
+        let detected = fx.detected_hz().unwrap();
+        assert!((1200.0 * (detected / 880.0).log2()).abs() < 2.0);
+        let actual = peak(&audio, 880.0, 8000);
+        assert!(
+            (actual - 880.0).abs() < 1.0,
+            "studio={studio}, PCM peak={actual}"
+        );
     }
 }
 #[test]

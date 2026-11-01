@@ -110,6 +110,8 @@ pub struct VocalTune {
     octave_candidate: f32,
     octave_frames: u8,
     retune_alpha: f32,
+    consonant_alpha: f32,
+    wet_alpha: f32,
     gain: f32,
     target_gain: f32,
     bypass: f32,
@@ -176,6 +178,8 @@ impl VocalTune {
             octave_candidate: 0.0,
             octave_frames: 0,
             retune_alpha: 0.0,
+            consonant_alpha: 1.0 - (-1.0 / (rate as f32 * 0.008)).exp(),
+            wet_alpha: 1.0 - (-1.0 / (rate as f32 * 0.012)).exp(),
             gain: 1.0,
             target_gain: 1.0,
             bypass: 1.0,
@@ -353,16 +357,15 @@ impl VocalTune {
         );
         // Smooth pitch confidence, consonant protection and Wet automation together.
         // Abrupt detector changes must never hard-switch the spectral output against the dry voice.
-        let consonant_alpha = 1.0 - (-1.0 / (self.rate * 0.008)).exp();
-        self.sibilance_smoothed += (self.sibilance - self.sibilance_smoothed) * consonant_alpha;
+        self.sibilance_smoothed +=
+            (self.sibilance - self.sibilance_smoothed) * self.consonant_alpha;
         let confidence = ((self.clarity - 0.28) / 0.52).clamp(0.0, 1.0);
         let target_mix = self.params.wet
             * self.voiced
             * confidence
             * (1.0 - self.sibilance_smoothed * self.params.protect_sibilants)
             * self.bypass;
-        let wet_alpha = 1.0 - (-1.0 / (self.rate * 0.012)).exp();
-        self.wet_mix_smoothed += (target_mix - self.wet_mix_smoothed) * wet_alpha;
+        self.wet_mix_smoothed += (target_mix - self.wet_mix_smoothed) * self.wet_alpha;
         let mix = self.wet_mix_smoothed.clamp(0.0, 1.0);
         let gain = 1.0 + (self.gain - 1.0) * self.bypass;
         let mut output = [
@@ -414,15 +417,22 @@ impl VocalTune {
         let min_lag = (rate / high).floor().max(2.0) as usize;
         let max_lag = ((rate / low).ceil() as usize).min(MAX_LAG);
         let points = if self.params.studio { 384 } else { 256 };
+        // Linearize the ring once per analysis. The inner YIN loop can then
+        // read contiguous slices without wrapping every sample at every lag.
+        // The extra lag supplies both neighbours even at the low range limit.
+        let mut samples = [0.0; 384 + MAX_LAG + 1];
+        for (j, sample) in samples[..points + max_lag + 1].iter_mut().enumerate() {
+            *sample = self.sample(j);
+        }
         let mut energy = 0.0;
         let mut roughness = 0.0;
         let mut absolute = 0.0;
         for j in 0..points {
-            let x = self.sample(j);
+            let x = samples[j];
             energy += x * x;
             absolute += x.abs();
             if j > 0 {
-                roughness += (x - self.sample(j - 1)).abs();
+                roughness += (x - samples[j - 1]).abs();
             }
         }
         self.sibilance = ((roughness / (2.0 * absolute + 1e-8) - 0.28) / 0.45).clamp(0.0, 1.0);
@@ -433,12 +443,16 @@ impl VocalTune {
         let threshold = 0.08 + 0.18 * self.params.sensitivity;
         let mut cumulative = 0.0;
         let mut best = (min_lag, 1.0);
-        for lag in 1..=max_lag {
+        let mut differences = [0.0; MAX_LAG + 2];
+        for lag in 1..=max_lag + 1 {
             let mut d = 0.0;
-            for j in 0..points {
-                let difference = self.sample(j) - self.sample(j + lag);
+            for (&current, &delayed) in samples[..points].iter().zip(&samples[lag..lag + points]) {
+                let difference = current - delayed;
                 d += difference * difference;
             }
+            differences[lag] = d;
+        }
+        for (lag, &d) in differences.iter().enumerate().take(max_lag + 1).skip(1) {
             cumulative += d;
             self.scores[lag] = if cumulative > 1e-12 {
                 d * lag as f32 / cumulative
@@ -488,10 +502,13 @@ impl VocalTune {
                 self.octave_candidate = 0.0;
             }
         }
-        let a = self.scores[lag - 1];
         let b = self.scores[lag];
-        let c = self.scores[(lag + 1).min(max_lag)];
-        let den = a - 2.0 * b + c;
+        // Use CMND to select/reject periods, but interpolate the raw difference
+        // minimum. Its normalization slopes bias short periods (high voices).
+        let a = differences[lag - 1];
+        let center = differences[lag];
+        let c = differences[lag + 1];
+        let den = a - 2.0 * center + c;
         let frac = if den.abs() > 1e-8 {
             (0.5 * (a - c) / den).clamp(-0.5, 0.5)
         } else {
