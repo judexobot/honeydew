@@ -1,7 +1,7 @@
 name: Console Color · fidelity tests and Android ARM64
 on:
   push:
-    branches: [feature/console-color-fx, feature/console-color-fidelity-v2]
+    branches: [feature/console-color-fx, feature/console-color-fidelity-v2, feature/console-color-real-codecs-v3]
   workflow_dispatch:
 concurrency:
   group: console-color-${{ github.ref }}
@@ -26,6 +26,7 @@ jobs:
       - name: Console DSP + effects API
         run: |
           cargo test -p honeydew-audio --locked --lib console_color
+          cargo test -p honeydew-audio --locked --lib console_codecs
           cargo test -p honeydew-audio --locked --test effects
       - name: UI registry, layout, instruments and saved projects
         run: |
@@ -64,7 +65,7 @@ jobs:
         run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.0.13004108" tools/android-dist.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: Honeydew-ConsoleColor-SNES-GBA-N64-PS1-Android-arm64-debug
+          name: Honeydew-ConsoleColor-RealCodecs-v3-Android-arm64-debug
           path: target/honeydew-android-*-arm64-debug.apk
           if-no-files-found: error
           retention-days: 7
