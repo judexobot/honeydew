@@ -72,7 +72,7 @@ pub fn encode_brr(input: &[i16; 16], hist: [i32; 2]) -> [u8; 9] {
         for shift in 0..=12 {
             let mut state = hist;
             let mut candidate = [0u8; 9];
-            candidate[0] = ((shift << 4) | (filter << 2)) as u8;
+            candidate[0] = ((shift as u8) << 4) | ((filter as u8) << 2);
             let step = (2.0f32).powi(shift - 1);
             let mut error = 0.0f64;
             for (i, &target) in input.iter().enumerate() {
