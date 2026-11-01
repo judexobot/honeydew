@@ -65,15 +65,16 @@ pub(super) fn build(
             f64::from(sample_rate),
             f64::from(tempo_bpm),
             capacity,
-        ).map_err(EngineError::Notes)
+        )
+        .map_err(EngineError::Notes)
     };
-    let sources = if song.channels[channel].rack.modules.iter().any(|m| m.type_id == 55) {
-        16
-    } else if song.channels[channel].rack.modules.iter().any(|m| m.type_id == 54) {
-        4
-    } else {
-        0
-    };
+    let sources = song.channels[channel]
+        .rack
+        .modules
+        .iter()
+        .map(|m| super::generators::midi_sources(m.type_id))
+        .max()
+        .unwrap_or(0);
     let midi = (0..sources)
         .map(|_| make_chain(effects.clone()))
         .collect::<Result<Vec<_>, _>>()?;
@@ -138,7 +139,9 @@ impl Live {
     /// Forgets its notes in flight: all notes off on its channel alone.
     pub(super) fn clear(&mut self) {
         self.chain.clear();
-        for chain in &mut self.midi { chain.clear(); }
+        for chain in &mut self.midi {
+            chain.clear();
+        }
     }
 }
 
@@ -153,7 +156,9 @@ impl SongAudioEngine {
         let now = self.live_frame(0);
         for live in self.live.iter_mut().flatten() {
             live.chain.set_tempo(now, f64::from(bpm));
-            for chain in &mut live.midi { chain.set_tempo(now, f64::from(bpm)); }
+            for chain in &mut live.midi {
+                chain.set_tempo(now, f64::from(bpm));
+            }
         }
     }
 

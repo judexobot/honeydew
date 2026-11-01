@@ -40,6 +40,19 @@ pub trait Instrument: Send {
     /// position of the block's first frame (`start_beat`), the tempo and whether the transport runs (`playing`), for
     /// LFOs that lock to the song while it plays and run free otherwise.
     fn process(&mut self, left: &mut [f32], right: &mut [f32], context: ProcessContext);
+    /// Optional audio input from the rack above this instrument. The default
+    /// preserves the ordinary generator behavior. Surge uses its original
+    /// audio-input oscillators and vocoder when the rack supplies a signal.
+    fn process_with_input(
+        &mut self,
+        _input_left: &[f32],
+        _input_right: &[f32],
+        left: &mut [f32],
+        right: &mut [f32],
+        context: ProcessContext,
+    ) {
+        self.process(left, right, context);
+    }
     /// The song tempo, for tempo-synced params. The engine calls it once after construction.
     fn set_tempo_bpm(&mut self, _bpm: f32) {}
     /// Channel param `index` is now `value`, the param's normalized v in 0..=1: 4 Pitch Bend,
@@ -244,7 +257,8 @@ impl InstrumentModule {
             let (wet_l, wet_r) = (&mut self.left[..frames], &mut self.right[..frames]);
             wet_l.fill(0.0);
             wet_r.fill(0.0);
-            self.instrument.process(wet_l, wet_r, context);
+            self.instrument
+                .process_with_input(out_l, out_r, wet_l, wet_r, context);
             self.delay.process(wet_l, wet_r);
             // Post Gain, Mix and Wet Pan apply only while some signal is present: a part where the
             // instrument and the buffer are both exact silence stays 0 and their smoothing holds.

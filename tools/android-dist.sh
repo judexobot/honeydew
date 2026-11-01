@@ -84,6 +84,28 @@ with zipfile.ZipFile(sys.argv[1]) as apk:
         # Fail rather than shipping a silently degraded native synth.
         factory_wave = 'assets/surge-xt/wavetables/Basic/Sine.wt'
         assert len(apk.read(factory_wave)) > 100, 'missing original Surge XT wavetable assets'
+        manifest = apk.read('assets/surge-xt/factory-manifest.tsv').decode('utf-8')
+        for row in manifest.splitlines():
+            sha, relative = row.split('\t', 1)
+            assert hashlib.sha256(apk.read('assets/surge-xt/' + relative)).hexdigest() == sha, relative
+        bank = json.loads(apk.read('assets/surge-xt/factory-bank.json'))
+        assert bank['revision'] == '5a4828a33ac4b2e2b45671b34e9e0e3f0c614765'
+        assert len(bank['patches']) == 641
+        paths = [p['path'] for p in bank['patches']]
+        assert paths == open('src/content/presets/surge_xt_factory.tsv').read().splitlines()
+        chunks = bytearray()
+        for patch in bank['patches']:
+            original = apk.read('assets/surge-xt/patches_factory/' + patch['path'])
+            assert hashlib.sha256(original).hexdigest() == patch['fxp_sha256'], patch['path']
+            assert original[:4] == b'CcnK' and original[8:12] == b'FPCh'
+            size = int.from_bytes(original[56:60], 'big')
+            assert len(original) == size + 60
+            chunks.extend(original[60:])
+        # The 641 exact chunks must also be present in the native ELF bank
+        # actually shipped to the phone, in the browser's exact index order.
+        native = apk.read('lib/arm64-v8a/libhoneydew_surge_xt.so')
+        assert bytes(chunks) in native, 'APK Surge library does not contain the verified FXP bank'
+        print('Verified all 641 official FXPs, native bank order and every resource SHA-256')
     for lib in native_libs:
         assert apk.getinfo('lib/arm64-v8a/' + lib).compress_type == zipfile.ZIP_STORED, lib
     assert apk.read('assets/content/CREDITS.txt'), 'missing sound credits'

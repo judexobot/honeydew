@@ -44,13 +44,12 @@ public final class HoneydewActivity extends NativeActivity {
     }
 
     private HoneydewMidiBridge midiBridge;
-    private static native void nativeSetSurgeFactoryDataDir(String root);
+    private static native boolean nativeSetSurgeFactoryDataDir(String root, String user);
 
     // Surge's original factory wavetable files are shipped alongside the real
     // C++ engine. Copy once into Android-private storage because Surge XT scans
     // factory wavetable directories with native filesystem APIs, not AssetManager.
-    private static final String SURGE_WT_SOURCE = "surge-xt/wavetables";
-    private static final String SURGE_REV = "5a4828a33ac4b2e2b45671b34e9e0e3f0c614765";
+    private static final String SURGE_SOURCE = "surge-xt";
 
     private static void copySurgeAssets(AssetManager assets, String assetDir, File target)
             throws java.io.IOException {
@@ -82,23 +81,74 @@ public final class HoneydewActivity extends NativeActivity {
             throw new java.io.IOException("Cannot replace old Surge factory data");
     }
 
+    private static String surgeDigest(InputStream input) throws java.io.IOException {
+        try {
+            java.security.MessageDigest sha = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[65536];
+            for (int n; (n = input.read(buffer)) >= 0;) if (n > 0) sha.update(buffer, 0, n);
+            StringBuilder hex = new StringBuilder(64);
+            for (byte b : sha.digest()) hex.append(String.format(java.util.Locale.ROOT, "%02x", b & 255));
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new java.io.IOException("SHA-256 unavailable", e);
+        }
+    }
+
+    private static boolean verifySurgeAssets(File root, String manifest) throws java.io.IOException {
+        String prefix = root.getCanonicalPath() + File.separator;
+        for (String line : manifest.split("\n")) {
+            if (line.isEmpty()) continue;
+            String[] fields = line.split("\t", 2);
+            if (fields.length != 2 || !fields[0].matches("[0-9a-f]{64}"))
+                throw new java.io.IOException("Invalid Surge factory integrity manifest");
+            File file = new File(root, fields[1]);
+            if (!file.getCanonicalPath().startsWith(prefix))
+                throw new java.io.IOException("Unsafe Surge factory resource path");
+            if (!file.isFile()) return false;
+            try (InputStream input = new java.io.FileInputStream(file)) {
+                if (!fields[0].equals(surgeDigest(input))) return false;
+            }
+        }
+        return true;
+    }
+
     private void prepareSurgeFactoryData() {
         // The ordinary (non-Surge) build contains no assets in this folder.
         try {
-            if (getAssets().list(SURGE_WT_SOURCE).length == 0) return;
+            if (getAssets().list(SURGE_SOURCE).length == 0) return;
+            String manifest;
+            try (InputStream input = getAssets().open(SURGE_SOURCE + "/factory-manifest.tsv")) {
+                java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+                byte[] buffer = new byte[65536];
+                for (int n; (n = input.read(buffer)) >= 0;) if (n > 0) out.write(buffer, 0, n);
+                manifest = out.toString("UTF-8");
+            }
+            String identity = surgeDigest(new java.io.ByteArrayInputStream(
+                    manifest.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
             File root = new File(getFilesDir(), "surge-xt-factory");
             File marker = new File(root, ".revision");
             if (!marker.isFile() ||
-                    !SURGE_REV.equals(new String(java.nio.file.Files.readAllBytes(
-                            marker.toPath()), java.nio.charset.StandardCharsets.UTF_8))) {
+                    !identity.equals(new String(java.nio.file.Files.readAllBytes(
+                            marker.toPath()), java.nio.charset.StandardCharsets.UTF_8)) ||
+                    !verifySurgeAssets(root, manifest)) {
+                File staged = new File(getFilesDir(), "surge-xt-factory.tmp");
+                if (staged.exists()) deleteSurgeAssets(staged);
+                copySurgeAssets(getAssets(), SURGE_SOURCE, staged);
+                if (!verifySurgeAssets(staged, manifest))
+                    throw new java.io.IOException("Surge factory resources failed SHA-256 validation");
                 if (root.exists()) deleteSurgeAssets(root);
-                copySurgeAssets(getAssets(), SURGE_WT_SOURCE, new File(root, "wavetables"));
+                if (!staged.renameTo(root))
+                    throw new java.io.IOException("Cannot activate verified Surge factory resources");
                 try (OutputStream out = new FileOutputStream(marker)) {
-                    out.write(SURGE_REV.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    out.write(identity.getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 }
             }
-            nativeSetSurgeFactoryDataDir(root.getAbsolutePath());
-            Log.i("HoneydewSurgeXT", "Original Surge XT factory wavetables initialized");
+            File user = new File(getFilesDir(), "surge-xt-user");
+            if (!user.isDirectory() && !user.mkdirs())
+                throw new java.io.IOException("Cannot create Surge private user directory");
+            if (!nativeSetSurgeFactoryDataDir(root.getAbsolutePath(), user.getAbsolutePath()))
+                throw new java.io.IOException("Native Surge rejected its factory/private user paths");
+            Log.i("HoneydewSurgeXT", "B: verified 641 FXPs and original resources; private paths ready");
         } catch (java.io.IOException | UnsatisfiedLinkError e) {
             Log.e("HoneydewSurgeXT", "Cannot initialize original factory wavetables", e);
         }

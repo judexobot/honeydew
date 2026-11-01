@@ -54,12 +54,12 @@ pub enum SynthKind {
     SoundFontPlayer,
     GameBoyApu,
     Gen,
-    #[cfg(all(target_os = "android", feature = "surge-xt"))]
+    #[cfg(all(any(target_os = "android", target_os = "linux"), feature = "surge-xt"))]
     SurgeXt,
 }
 
 impl SynthKind {
-    #[cfg(not(all(target_os = "android", feature = "surge-xt")))]
+    #[cfg(not(all(any(target_os = "android", target_os = "linux"), feature = "surge-xt")))]
     pub const ALL: [Self; 10] = [
         Self::MiniSynth,
         Self::DwSampler,
@@ -73,11 +73,19 @@ impl SynthKind {
         Self::Gen,
     ];
 
-    #[cfg(all(target_os = "android", feature = "surge-xt"))]
+    #[cfg(all(any(target_os = "android", target_os = "linux"), feature = "surge-xt"))]
     pub const ALL: [Self; 11] = [
-        Self::MiniSynth, Self::DwSampler, Self::GmSynth, Self::TransistorBass,
-        Self::SuperSaw, Self::Slicer, Self::ThreeXOsc, Self::SoundFontPlayer,
-        Self::GameBoyApu, Self::Gen, Self::SurgeXt,
+        Self::MiniSynth,
+        Self::DwSampler,
+        Self::GmSynth,
+        Self::TransistorBass,
+        Self::SuperSaw,
+        Self::Slicer,
+        Self::ThreeXOsc,
+        Self::SoundFontPlayer,
+        Self::GameBoyApu,
+        Self::Gen,
+        Self::SurgeXt,
     ];
 
     pub fn label(self) -> &'static str {
@@ -92,7 +100,7 @@ impl SynthKind {
             Self::SoundFontPlayer => "SoundFont Player",
             Self::GameBoyApu => "Game Boy APU",
             Self::Gen => "Gen",
-            #[cfg(all(target_os = "android", feature = "surge-xt"))]
+            #[cfg(all(any(target_os = "android", target_os = "linux"), feature = "surge-xt"))]
             Self::SurgeXt => "Surge XT",
         }
     }
@@ -110,7 +118,7 @@ impl SynthKind {
             Self::SoundFontPlayer => 52,
             Self::GameBoyApu => 54,
             Self::Gen => 55,
-            #[cfg(all(target_os = "android", feature = "surge-xt"))]
+            #[cfg(all(any(target_os = "android", target_os = "linux"), feature = "surge-xt"))]
             Self::SurgeXt => 57,
         }
     }

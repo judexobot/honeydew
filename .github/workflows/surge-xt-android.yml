@@ -9,7 +9,43 @@ concurrency:
   group: surge-original-android-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  native-audio:
+    name: Original Surge audio (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 80
+    env:
+      CARGO_BUILD_JOBS: "2"
+      SURGE_BUILD_JOBS: "3"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: surge-audio-${{ matrix.runner }}
+      - name: Native audio build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build clang libclang-dev libasound2-dev libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+      - name: Original core, all 641 FXPs, reference PCM and Honeydew mixer
+        run: bash tools/surge-xt-test.sh
+      - name: Other instrument and application regressions
+        if: matrix.runner == 'ubuntu-24.04'
+        run: cargo test --workspace --lib --locked
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Surge-XT-audio-QA-${{ matrix.runner }}
+          path: target/surge-audio-qa
+          if-no-files-found: warn
+          retention-days: 14
   android-surge:
+    needs: native-audio
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:

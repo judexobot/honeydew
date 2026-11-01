@@ -101,6 +101,11 @@ fn midi_cc(instance_id: i32, index: i32) -> bool {
 #[derive(Debug)]
 pub enum EngineError {
     InvalidTiming,
+    /// A required native instrument failed; never replace it with an empty lane.
+    Instrument {
+        type_id: u16,
+        reason: String,
+    },
     Song(SongAudioError),
     Mixer(MixError),
     Notes(NoteEffectError),
@@ -288,7 +293,9 @@ impl SongAudioEngine {
         let mixer = Mixer::new(&mixes).map_err(EngineError::Mixer)?;
         // Install 0.4.2 sidechain key buffers without removing VocalTune compensation.
         for &(channel, instance_id, source) in &routing.keyed {
-            let _ = bridge.audio.set_key(channel, instance_id, source, BLOCK_FRAMES);
+            let _ = bridge
+                .audio
+                .set_key(channel, instance_id, source, BLOCK_FRAMES);
         }
         let maximum: Vec<_> = bridge
             .audio
@@ -368,6 +375,18 @@ impl SongAudioEngine {
                 samples,
                 song.time_sig,
             );
+            #[cfg(all(any(target_os = "android", target_os = "linux"), feature = "surge-xt"))]
+            if channel
+                .rack
+                .modules
+                .iter()
+                .any(|m| m.type_id == 57 && !modules.iter().any(|(id, _)| *id == m.instance_id))
+            {
+                return Err(EngineError::Instrument {
+                    type_id: 57,
+                    reason: honeydew_audio::surge_xt::diagnostic_message(),
+                });
+            }
             // Each instrument runs after the effects above it.
             let mut effects = 0;
             for module in &channel.rack.modules {
@@ -447,13 +466,12 @@ impl SongAudioEngine {
             .map(|(channel, modules)| {
                 // Independent source rows keep sequenced MIDI identities on seeks, loops and edits.
                 let rack = &song.channels[channel].rack.modules;
-                let sources = if rack.iter().any(|m| m.type_id == 55) {
-                    16
-                } else if rack.iter().any(|m| m.type_id == 54) {
-                    4
-                } else {
-                    0
-                };
+                let sources = usize::from(
+                    rack.iter()
+                        .map(|m| generators::midi_sources(m.type_id))
+                        .max()
+                        .unwrap_or(0),
+                );
                 vec![[0; 128]; modules.len() + 1 + sources * modules.len()]
             })
             .collect();

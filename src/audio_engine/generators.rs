@@ -14,15 +14,26 @@ use crate::song::plugin::PLUGIN_INSTRUMENT;
 use crate::song::{Channel, ModuleInstance, TimeSig};
 use honeydew_audio::dw_sampler::{DwSampler, DwZone};
 use honeydew_audio::dwp::Cstm;
-use honeydew_audio::gmsynth::{self, GmSynth};
 use honeydew_audio::gameboy_instrument::GameBoyInstrument;
 use honeydew_audio::r#gen::Gen;
+use honeydew_audio::gmsynth::{self, GmSynth};
 use honeydew_audio::instrument::{Instrument, InstrumentModule};
 use honeydew_audio::minisynth::MiniSynth;
 use honeydew_audio::soundfont::SoundFontPlayer;
 use honeydew_audio::supersaw::SuperSaw;
 use honeydew_audio::three_osc::ThreeOsc;
 use honeydew_audio::transistor_bass::TransistorBass;
+
+/// MIDI identities retained by an instrument, including live input and seeks.
+pub(crate) fn midi_sources(type_id: u16) -> u8 {
+    match type_id {
+        55 => 16,
+        #[cfg(all(any(target_os = "android", target_os = "linux"), feature = "surge-xt"))]
+        57 => 16,
+        54 => 4,
+        _ => 0,
+    }
+}
 
 /// The instrument for `module`'s type on `channel` at `sample_rate`, playing samples from `samples`; `None` for a type
 /// without one yet. `origin` hears what it is built from besides its params ([`InstrumentModule::origin`]): the data a
@@ -64,19 +75,24 @@ fn instrument(
         )?)),
         54 => Some(Box::new(GameBoyInstrument::new(sample_rate))),
         55 => Some(Box::new(Gen::new(sample_rate))),
-        #[cfg(all(target_os = "android", feature = "surge-xt"))]
+        #[cfg(all(any(target_os = "android", target_os = "linux"), feature = "surge-xt"))]
         57 => {
             // A factory preset is a different original Surge patch, so rebuild
             // it on the app thread. Never decode FXPs in the audio callback.
-            let value = module.params.get(33).copied().unwrap_or(0.0).clamp(0.0, 1.0);
-            let patch = (value * honeydew_audio::surge_xt::FACTORY_PRESET_COUNT as f32).round()
-                as usize;
+            let value = module
+                .params
+                .get(33)
+                .copied()
+                .unwrap_or(0.0)
+                .clamp(0.0, 1.0);
+            let patch =
+                (value * honeydew_audio::surge_xt::FACTORY_PRESET_COUNT as f32).round() as usize;
             patch.hash(origin);
             Some(Box::new(
                 honeydew_audio::surge_xt::SurgeXt::new_with_factory_preset(sample_rate, patch)
                     .ok()?,
             ))
-        },
+        }
         52 => Some(Box::new(soundfont_player(
             module,
             sample_rate,

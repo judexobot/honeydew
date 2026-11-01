@@ -15,11 +15,15 @@ target_include_directories(honeydew_surge_xt PRIVATE
   "${CMAKE_BINARY_DIR}/generated"
 )
 target_link_libraries(honeydew_surge_xt PRIVATE surge-common)
+option(HONEYDEW_SURGE_APP_PATHS "Test the Android private-path adapter on native Linux" OFF)
+if(HONEYDEW_SURGE_APP_PATHS)
+  target_compile_definitions(sst-plugininfra PRIVATE HONEYDEW_SURGE_APP_PATHS=1)
+endif()
 # Android's linker can otherwise emit an ELF with unresolved symbols,
 # causing dlopen(RTLD_NOW) to fail only when the user opens an instrument.
 # Diagnose those missing dependencies during GitHub Actions instead.
 if(ANDROID)
-  target_link_options(honeydew_surge_xt PRIVATE "-Wl,--no-undefined")
+  target_link_options(honeydew_surge_xt PRIVATE "-Wl,--no-undefined" "-Wl,-z,max-page-size=16384")
 endif()
 target_compile_features(honeydew_surge_xt PRIVATE cxx_std_20)
 set_target_properties(honeydew_surge_xt PROPERTIES
@@ -30,3 +34,12 @@ set_target_properties(honeydew_surge_xt PROPERTIES
 # The C symbols are exported explicitly; Surge's C++ internals stay hidden.
 set_source_files_properties("${HONEYDEW_SURGE_DIR}/native/surge-xt/surge_honeydew.cpp"
   PROPERTIES COMPILE_OPTIONS "-fvisibility=default")
+
+option(HONEYDEW_SURGE_TESTS "Build audio tests using the real Surge engine" OFF)
+if(HONEYDEW_SURGE_TESTS)
+  enable_testing()
+  add_executable(honeydew_surge_audio_test
+    "${HONEYDEW_SURGE_DIR}/native/surge-xt/audio_test.cpp")
+  target_include_directories(honeydew_surge_audio_test PRIVATE "${CMAKE_BINARY_DIR}/generated")
+  target_link_libraries(honeydew_surge_audio_test PRIVATE surge-common)
+endif()

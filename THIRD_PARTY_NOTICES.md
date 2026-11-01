@@ -568,3 +568,20 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+# Surge XT native preset instrument
+
+The optional Surge XT instrument links the original `surge-common` synthesis
+engine from [Surge XT](https://github.com/surge-synthesizer/surge), revision
+`5a4828a33ac4b2e2b45671b34e9e0e3f0c614765`, under GPL-3.0-or-later.
+Its corresponding source includes the submodule revisions recorded in that
+commit. Honeydew's platform/build adaptations are in `tools/surge-xt-prepare.py`;
+they adapt Android filesystem paths, Bionic diagnostics and pthread linkage.
+The original DSP algorithms are retained, including LuaJIT, oscillators, filters,
+modulation and effects. No desktop GUI is included.
+
+The 641 original factory FXPs retain their names, categories and patch metadata,
+including original authors and licenses. Original wavetables, factory impulse
+responses and tuning resources are included. `assets/surge-xt/Surge-XT-LICENSE.txt`
+contains the upstream license; `factory-bank.json` and `factory-manifest.tsv`
+record the revision, exact FXP hashes and resource hashes. Factory patch metadata
+remain inside their unmodified FXP payloads.

@@ -69,7 +69,7 @@ pub const SOURCES: &[u16] = &[
     SUPERSAW,
     THREE_OSC,
     // Preset-only original Surge XT is an Android feature, not a GUI editor.
-    #[cfg(all(target_os = "android", feature = "surge-xt"))]
+    #[cfg(all(any(target_os = "android", target_os = "linux"), feature = "surge-xt"))]
     57,
 ];
 

@@ -28,9 +28,9 @@ use std::path::Path;
 
 mod r#gen;
 mod gm_synth;
-mod three_osc;
-#[cfg(all(target_os = "android", feature = "surge-xt"))]
+#[cfg(all(any(target_os = "android", target_os = "linux"), feature = "surge-xt"))]
 mod surge_xt;
+mod three_osc;
 
 use super::{Entry, PRESETS, ROOT};
 use crate::flm;
@@ -60,7 +60,7 @@ fn banks() -> impl Iterator<Item = (u16, &'static [Preset])> {
         .chain(once((53, VOCALTUNE)))
         .chain(once((54, GAMEBOY)))
         .chain(once((55, r#gen::BANK)));
-    #[cfg(all(target_os = "android", feature = "surge-xt"))]
+    #[cfg(all(any(target_os = "android", target_os = "linux"), feature = "surge-xt"))]
     let standard = standard.chain(once((57, surge_xt::bank())));
     standard
 }

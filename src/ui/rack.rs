@@ -145,6 +145,8 @@ pub fn ui_height(type_id: u16) -> Option<f32> {
         52 => 8.5,
         54 => 14.0,
         55 => 16.0,
+        #[cfg(all(any(target_os = "android", target_os = "linux"), feature = "surge-xt"))]
+        57 => 5.0,
         // Effects and note effects.
         3 | 7 | 26 | 30 | 51 => 10.0,
         4 | 35 | 36 | 43 | 46 => 9.0,
@@ -806,6 +808,10 @@ pub fn takes_instruments(channel: &Channel) -> bool {
 /// Whether a channel takes `module`, the one routine `Paste` and a rack preset's load share: module ids above 52 are
 /// skipped, and an instrument goes only where `notes` (the channel [takes instruments](takes_instruments)).
 fn attaches(module: &ModuleInstance, notes: bool) -> bool {
+    #[cfg(all(any(target_os = "android", target_os = "linux"), feature = "surge-xt"))]
+    if module.type_id == 57 {
+        return notes;
+    }
     module.type_id <= 52 && (notes || instrument(module.type_id).is_none())
 }
 
@@ -2358,6 +2364,20 @@ impl RackPanel {
     ) {
         let id = module.instance_id;
         let base = ui.id().with(("rack card", id));
+        #[cfg(all(any(target_os = "android", target_os = "linux"), feature = "surge-xt"))]
+        if module.type_id == 57 {
+            widgets::display_area(ui, cx, content);
+            let message = if honeydew_audio::surge_xt::diagnostic() < 0 {
+                honeydew_audio::surge_xt::diagnostic_message()
+            } else {
+                "Surge XT · 641 factory presets".to_owned()
+            };
+            ui.put(
+                content.shrink(cx.m.u(0.25)),
+                eframe::egui::Label::new(message).wrap(),
+            );
+            return;
+        }
         let Some(panel) = panels::panel_for(module.type_id) else {
             widgets::display_area(ui, cx, content);
             return;

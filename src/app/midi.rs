@@ -98,12 +98,19 @@ impl HoneydewApp {
         #[cfg(target_os = "android")]
         let hidden = hidden || crate::android::take_resumed();
         self.midi.fresh_mapped.clear();
-        if hidden { self.release_midi(); }
+        if hidden {
+            self.release_midi();
+        }
         let audio = &mut self.audio;
         let now = self.now;
         self.midi.gated_mapped.retain(|&(at, channel, midi, key)| {
             if now >= at {
-                audio.send(AudioCommand::MidiNote { channel, midi, key, velocity: None });
+                audio.send(AudioCommand::MidiNote {
+                    channel,
+                    midi,
+                    key,
+                    velocity: None,
+                });
                 false
             } else {
                 ctx.request_repaint_after_secs((at - now) as f32);
@@ -151,29 +158,51 @@ impl HoneydewApp {
             self.record_cc(msg, &targets, &outs, tick);
             // The 0.4.2 device-aware router knows which targets sound; mapped
             // Gen / Game Boy synths additionally receive the original MIDI channel.
-            let mut outs: Vec<Out> = outs.into_iter().map(|out| {
-                let channel = match out {
-                    Out::Note { channel, .. } | Out::ChannelParam { channel, .. } => channel,
-                    _ => return out,
-                };
-                let mapped = self.song.channels.get(channel).is_some_and(|c| {
-                    c.rack.modules.iter().any(|m| {
-                        m.type_id == 55
-                            || (m.type_id == 54
-                                && m.params.get(23).copied().unwrap_or(0.0) > 0.75)
-                    })
-                });
-                if !mapped { return out; }
-                match out {
-                    Out::Note { key, on, velocity, sound: true, .. } => Out::MidiNote {
-                        channel, midi: msg.channel(), key, on, velocity,
-                    },
-                    Out::ChannelParam { index, value, .. } => Out::MidiControl {
-                        channel, midi: msg.channel(), index, value,
-                    },
-                    other => other,
-                }
-            }).collect();
+            let mut outs: Vec<Out> = outs
+                .into_iter()
+                .map(|out| {
+                    let channel = match out {
+                        Out::Note { channel, .. } | Out::ChannelParam { channel, .. } => channel,
+                        _ => return out,
+                    };
+                    let mapped = self.song.channels.get(channel).is_some_and(|c| {
+                        c.rack.modules.iter().any(|m| {
+                            m.type_id == 55
+                                || (cfg!(all(
+                                    any(target_os = "android", target_os = "linux"),
+                                    feature = "surge-xt"
+                                )) && m.type_id == 57)
+                                || (m.type_id == 54
+                                    && m.params.get(23).copied().unwrap_or(0.0) > 0.75)
+                        })
+                    });
+                    if !mapped {
+                        return out;
+                    }
+                    match out {
+                        Out::Note {
+                            key,
+                            on,
+                            velocity,
+                            sound: true,
+                            ..
+                        } => Out::MidiNote {
+                            channel,
+                            midi: msg.channel(),
+                            key,
+                            on,
+                            velocity,
+                        },
+                        Out::ChannelParam { index, value, .. } => Out::MidiControl {
+                            channel,
+                            midi: msg.channel(),
+                            index,
+                            value,
+                        },
+                        other => other,
+                    }
+                })
+                .collect();
             // The learned key plays after its edit rebuilds the engine, so it sounds with its pad.
             outs.sort_by_key(|out| !matches!(out, Out::LearnedNote(_)));
             for out in outs {
@@ -220,7 +249,10 @@ impl HoneydewApp {
         self.midi.fresh_mapped.clear();
         for (_, channel, midi, key) in self.midi.gated_mapped.drain(..) {
             self.audio.send(AudioCommand::MidiNote {
-                channel, midi, key, velocity: None,
+                channel,
+                midi,
+                key,
+                velocity: None,
             });
         }
         for out in self.midi.router.release_all() {
