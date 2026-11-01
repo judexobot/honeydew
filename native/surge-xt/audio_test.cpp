@@ -127,6 +127,10 @@ void basics() {
     for (float rate : {44100.f, 48000.f, 96000.f}) {
         std::unique_ptr<Instance> instance(static_cast<Instance *>(honeydew_surge_create(rate)));
         require(bool(instance), "Init Saw construction failed");
+        require(path_to_string(instance->synth->storage.userDataPath).find(g_private_home) == 0,
+                "User data escaped Honeydew private storage");
+        require(path_to_string(instance->synth->storage.datapath) == g_factory_data_path,
+                "Factory data used desktop portable-path discovery");
         honeydew_surge_note_on(instance.get(), 0, 69, 112);
         auto audio = render(instance.get(), nullptr, int(rate / 32), false);
         require(audio.peak > 0.001f, "Init Saw note produced silence");

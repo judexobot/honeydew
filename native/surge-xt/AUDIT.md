@@ -31,6 +31,16 @@ symbols, constructor exceptions, invalid FXPs and render failures retain their
 concrete errors. A failed instrument aborts the replacement engine, allowing the
 previous project audio engine to remain active.
 
+A second Android-path failure was reproduced after the HOME adaptation: map the
+real shared library, deny search access to its parent directory, and create an
+engine with valid factory/private paths. Desktop portable-folder discovery still
+threw `filesystem error: status: Permission denied [.../SurgeXTData]`.
+Android storage initialization now bypasses portable/XDG/Documents discovery
+entirely and uses the supplied factory directory and private application/user
+folders. `surge-xt-path-test.py` combines a missing HOME with an inaccessible
+mapped-library parent and requires real Init Saw PCM. No synthesis algorithms
+are changed by this platform-path adaptation.
+
 Other integration errors corrected during the audit:
 
 - The C++ pitchBend() expects signed -8192..8191; the old ABI passed unsigned

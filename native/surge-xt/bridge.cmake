@@ -18,6 +18,8 @@ target_link_libraries(honeydew_surge_xt PRIVATE surge-common)
 option(HONEYDEW_SURGE_APP_PATHS "Test the Android private-path adapter on native Linux" OFF)
 if(HONEYDEW_SURGE_APP_PATHS)
   target_compile_definitions(sst-plugininfra PRIVATE HONEYDEW_SURGE_APP_PATHS=1)
+  set_property(SOURCE "${SURGE_SOURCE_DIR}/src/common/SurgeStorage.cpp"
+    TARGET_DIRECTORY surge-common APPEND PROPERTY COMPILE_DEFINITIONS HONEYDEW_SURGE_APP_PATHS=1)
 endif()
 # Android's linker can otherwise emit an ELF with unresolved symbols,
 # causing dlopen(RTLD_NOW) to fail only when the user opens an instrument.

@@ -32,6 +32,37 @@ replace(paths, '    const char *const path = std::getenv("HOME");', """#if defin
 replace(paths, 'throw std::runtime_error{"The environment variable HOME is unset or empty"};',
         'throw std::runtime_error{"Surge private user path was not initialized by Honeydew"};')
 
+# A private HOME alone is insufficient: desktop portable-mode discovery walks
+# the APK library's parents, some of which an Android app cannot stat. Adapt
+# only storage-path initialization, keeping all synthesis/table code intact.
+storage = source / "src/common/SurgeStorage.cpp"
+replace(storage, "namespace mech = sst::basic_blocks::mechanics;", """#if defined(__ANDROID__) || defined(HONEYDEW_SURGE_APP_PATHS)
+extern "C" const char *honeydew_surge_factory_directory() noexcept;
+#endif
+
+namespace mech = sst::basic_blocks::mechanics;""")
+replace(storage, """    localAppDataPath = sst::plugininfra::paths::bestLibrarySharedVendorFolderPathFor(
+        "Surge Synth Team", "Surge XT", true);
+    userDataPath = getOverridenUserPath();""", """#if defined(__ANDROID__) || defined(HONEYDEW_SURGE_APP_PATHS)
+    const auto privateHome = sst::plugininfra::paths::homePath();
+    localAppDataPath = privateHome / "application";
+    userDataPath = privateHome / "userdata";
+#else
+    localAppDataPath = sst::plugininfra::paths::bestLibrarySharedVendorFolderPathFor(
+        "Surge Synth Team", "Surge XT", true);
+    userDataPath = getOverridenUserPath();
+#endif""")
+replace(storage, """    bool isUserPortable{false};
+
+#if MAC""", """    bool isUserPortable{false};
+
+#if defined(__ANDROID__) || defined(HONEYDEW_SURGE_APP_PATHS)
+    const auto factoryDirectory = honeydew_surge_factory_directory();
+    if (!factoryDirectory || !factoryDirectory[0])
+        throw std::runtime_error("Honeydew did not initialize the Surge factory directory");
+    datapath = string_to_path(factoryDirectory);
+#elif MAC""")
+
 misc = source / "libs/sst/sst-plugininfra/src/misc_linux.cpp"
 replace(misc, "#include <execinfo.h>", "#if !defined(__ANDROID__)\n#include <execinfo.h>\n#endif")
 replace(misc, "std::string stackTraceToString(int depth)\n{\n    void *callstack[128];", """std::string stackTraceToString(int depth)

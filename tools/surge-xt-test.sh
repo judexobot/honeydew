@@ -24,6 +24,8 @@ export HONEYDEW_SURGE_DATA_PATH="$TARGET/android/assets/surge-xt"
 export HONEYDEW_SURGE_USER_PATH="$TARGET/surge-xt-private-user"
 mkdir -p "$TARGET/surge-audio-qa"
 cp "$BUILD/generated/factory-bank.json" "$TARGET/surge-audio-qa/"
+python3 tools/surge-xt-path-test.py "$HONEYDEW_SURGE_LIBRARY" "$HONEYDEW_SURGE_DATA_PATH" \
+  "$TARGET/surge-audio-qa"
 # A child without a desktop login environment reproduces Android's path setup.
 # Do not change the parent environment used by Rustup and the user's tools.
 python3 - "$BUILD/honeydew_surge_audio_test" "$HONEYDEW_SURGE_DATA_PATH" \

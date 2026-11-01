@@ -140,6 +140,9 @@ void operationFailed(void *handle, const char *detail) noexcept {
 extern "C" const char *honeydew_surge_private_home() noexcept {
     return g_private_home.empty() ? nullptr : g_private_home.c_str();
 }
+extern "C" const char *honeydew_surge_factory_directory() noexcept {
+    return g_factory_data_path.empty() ? nullptr : g_factory_data_path.c_str();
+}
 
 // Called from HoneydewActivity.onCreate before NativeActivity starts Rust;
 // must remain outside the audio callback, since the host path is initialized
@@ -179,8 +182,11 @@ HONEYDEW_EXPORT int honeydew_surge_set_data_path(const char *factory, const char
         const auto data = path_to_string(fs::canonical(fs::path(factory)));
         const auto home = path_to_string(fs::canonical(fs::path(user)));
         // Repeated Linux QA instances use the same immutable process paths.
-        if (!g_factory_data_path.empty() && (data != g_factory_data_path || home != g_private_home))
-            throw std::runtime_error("Surge paths cannot change while the process is running");
+        if (!g_factory_data_path.empty()) {
+            if (data != g_factory_data_path || home != g_private_home)
+                throw std::runtime_error("Surge paths cannot change while the process is running");
+            return 1; // Keep the path strings immutable after the first setup.
+        }
         g_factory_data_path = data;
         g_private_home = home;
         g_error[0] = 0;
