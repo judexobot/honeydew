@@ -796,3 +796,22 @@ fn gen_models_register_automation_retrigger_and_panics_allocate_nothing() {
     assert_eq!(calls, 0);
     assert!(left.iter().chain(&right).all(|v| v.is_finite()));
 }
+
+#[test]
+fn console_color_native_codecs_render_without_callback_allocations() {
+    // Creating the effect and its echo buffer happens outside the counted callback.
+    // Inside it, change modes and toggle codec while rendering across odd block sizes.
+    // This covers BRR, direct-sound PCM, VADPCM, VAG, reset, and automation.
+    let calls = counted(56, |rig| {
+        for mode in [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0] {
+            rig.effect.set_parameter(1, mode).unwrap();
+            for enabled in [1.0, 0.0, 1.0] {
+                rig.effect.set_parameter(11, enabled).unwrap();
+                rig.render(120.0, 0.08);
+            }
+            rig.effect.reset();
+            rig.render(92.0, 0.04);
+        }
+    });
+    assert_eq!(calls, 0, "Console Color native codecs allocated or freed in the audio callback");
+}
