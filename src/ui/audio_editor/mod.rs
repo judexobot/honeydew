@@ -63,7 +63,7 @@ use eframe::egui::{
 use honeydew_audio::sample::SampleData;
 use honeydew_audio::sample_edit::{peaks, speed_ratio};
 
-use crate::metrics::Metrics;
+use crate::metrics::{FontSize, Metrics};
 use crate::sample_cache::Waveform;
 use crate::song::points::{self, Point, PointKey};
 use crate::song::{Channel, Clip, LaneKind, PPQ, SamplerSlot, Song};
@@ -749,6 +749,23 @@ impl AudioEditor {
             _ => (pts.clone(), self.sel.clone()),
         };
         self.paint_points(&gp, cx, &f, axis, &shown, max, ink, now);
+        // BPM belongs to this audio clip, not the song's tempo. An estimated
+        // value does not switch SYNC on; it is only annotated here.
+        if let Some(info) = crate::song::auto_bpm::read(clip) {
+            let source = if info.embedded { "FILE BPM" } else { "AUTO BPM" };
+            let label = if info.embedded {
+                format!("{source} {:.2}", info.bpm)
+            } else {
+                format!("{source} {:.2}  ({:.0}% consistency)", info.bpm, info.confidence * 100.0)
+            };
+            gp.text(
+                egui::pos2(f.grid.right() - m.u(0.3), f.grid.top() + m.u(0.3)),
+                egui::Align2::RIGHT_TOP,
+                label,
+                m.font_id(FontSize::Pt10),
+                c.text.to_color32(),
+            );
+        }
         let boxing = if let Gesture::Marquee { from, to } = self.gesture {
             let r = Rect::from_two_pos(from, to);
             let text = c.text.to_color32();

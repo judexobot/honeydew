@@ -43,6 +43,7 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use eframe::egui;
 use honeydew_audio::device::AudioCommand;
 use honeydew_audio::sample::decode;
+use honeydew_audio::tempo_detect;
 
 use super::preset_picker::{WORKER_LOST, block, outcome, spawn};
 use super::{AppCtx, Nav, drum_editor};
@@ -54,6 +55,7 @@ use crate::flm::chunk::{ContentPath, ContentRoot};
 use crate::panels::inst::{slicer, three_osc};
 use crate::project_files::{DRUM_SAMPLES, ProjectFiles, SAMPLE_EXTS, SAMPLES_FOLDER, load_pick};
 use crate::sample_cache::{self, SampleCache, SampleKey, Waveform, disk_reader};
+use crate::song::auto_bpm::{self, ClipBpm};
 use crate::song::{DrumKit, Lane, LaneKind, ModuleInstance, SamplerSlot, Song};
 use crate::ui::drums::PAD_COUNT;
 use crate::ui::picker_preview::{Play, SampleStrip};
@@ -128,6 +130,9 @@ pub(crate) struct Decoded {
     pub samples: SampleCache,
     /// The sample and its waveform, for the sample strip: `None` for a table, or a file that does not decode.
     pub wave: Option<Waveform>,
+    /// An embedded file BPM, or an estimated BPM for a clip import only.
+    /// A guess is metadata and does not silently enable time stretching.
+    pub bpm: Option<ClipBpm>,
     /// Why the file does not read or decode; `None` when it does, or is ours.
     pub error: Option<String>,
 }
@@ -174,6 +179,28 @@ pub(super) fn decode_pick(
     let read = |_: &ContentPath| bytes.as_ref().ok().cloned();
     samples.load_sample(key.clone(), shape, &read);
     let wave = samples.get(&key).map(Waveform::new);
+    // Analyze only audio clips, not pads, one-shots, the Slicer or 3x Osc.
+    // This entire function already runs on the sample-picker worker.
+    let bpm = if matches!(&into, Some(PickFor::Clip(..))) {
+        wave.as_ref().and_then(|wave| {
+            if let Some(file_bpm) = wave.data.meta.tempo {
+                let info = ClipBpm {
+                    bpm: file_bpm,
+                    confidence: 1.0,
+                    embedded: true,
+                };
+                info.valid().then_some(info)
+            } else {
+                tempo_detect::detect(&wave.data).map(|estimate| ClipBpm {
+                    bpm: estimate.bpm,
+                    confidence: estimate.confidence,
+                    embedded: false,
+                })
+            }
+        })
+    } else {
+        None
+    };
     match (into, &wave) {
         // The pad plays its first frames at once, and the rest streams in once the pick applies (its
         // job goes with `samples`), as a `Stretch` re-import's.
@@ -196,6 +223,7 @@ pub(super) fn decode_pick(
     Decoded {
         samples,
         wave,
+        bpm,
         error,
     }
 }
@@ -309,6 +337,7 @@ fn pick(
             let lost = |_| Decoded {
                 samples: SampleCache::default(),
                 wave: None,
+                bpm: None,
                 error: Some(WORKER_LOST.into()),
             };
             let (path, _) = state.loading.take().expect("loading");
@@ -482,6 +511,7 @@ pub fn show_clip(
         let mut slot = clip.file.sample.as_deref().cloned().unwrap_or_default();
         if load_clip_sample(&mut slot, &path, app.files, tempo, bpm) {
             clip.file.sample = Some(Box::new(slot));
+            auto_bpm::write(clip, decoded.bpm);
             app.audio.samples.forget_missing();
             app.audio.samples.absorb(decoded.samples);
             // A change.
@@ -540,6 +570,7 @@ pub fn show_track(
         None => l.add_clip(tick, f64::from(bar)),
     };
     clip.file.sample = Some(Box::new(slot));
+    auto_bpm::write(clip, decoded.bpm);
     fit_audio_clip(clip, &app.audio.samples, bpm, bar);
     state.made = Some(clip.id);
     match made {
@@ -666,6 +697,7 @@ pub(crate) fn drop_clip(
     samples.absorb(decoded.samples);
     let clip = lane.add_clip(tick, f64::from(bar));
     clip.file.sample = Some(Box::new(slot));
+    auto_bpm::write(clip, decoded.bpm);
     fit_audio_clip(clip, samples, bpm, bar);
     Some(tick.saturating_add(clip.visible_ticks().round() as u32))
 }
@@ -842,6 +874,46 @@ mod tests {
         });
         let ours = decode_pick(dust, Ok(Vec::new()), false, None);
         assert!(ours.wave.is_some() && ours.error.is_none());
+    }
+
+    #[test]
+    fn audio_clip_import_estimates_missing_bpm_without_touching_project_tempo() {
+        use crate::sample_cache::tests::wav;
+
+        const RATE: usize = 44_100;
+        const SECONDS: usize = 10;
+        let mut pcm = vec![0i16; RATE * SECONDS];
+        let bpm = 128.0;
+        for beat in 0..22 {
+            let start = (beat as f64 * 60.0 / bpm * RATE as f64).round() as usize;
+            for k in 0..150 {
+                if let Some(frame) = pcm.get_mut(start + k) {
+                    *frame = (22000.0 * (1.0 - k as f64 / 150.0)) as i16;
+                }
+            }
+        }
+        let key = SampleKey::File(user_path("My Samples/DrumLoop.wav"));
+        let decoded = decode_pick(
+            key.clone(),
+            Ok(wav(&pcm)),
+            false,
+            Some(PickFor::Clip(SamplerSlot::default(), 120.0)),
+        );
+        assert!(decoded.error.is_none());
+        assert_eq!(decoded.wave.as_ref().unwrap().data.meta.tempo, None);
+        let result = decoded.bpm.expect("transients yield an estimated BPM");
+        assert!(!result.embedded);
+        assert!((result.bpm - 128.0).abs() < 1.2, "{result:?}");
+        assert!(result.confidence > 0.2);
+
+        // A drum pad is not analyzed as a loop.
+        let pad = decode_pick(
+            key,
+            Ok(wav(&pcm)),
+            false,
+            Some(PickFor::Pad(SamplerSlot::default())),
+        );
+        assert_eq!(pad.bpm, None);
     }
 
     #[test]
