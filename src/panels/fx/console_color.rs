@@ -17,11 +17,12 @@ pub fn panel() -> Option<Panel> {
             knob(9, "Mix").p(9),
             knob(10, "Output Gain").p(10),
         ]).h(Size::U(3.5)),
+        hstack([spinner(11, "Native Codec").p(11)]).h(Size::U(3.5)),
     ])))
 }
 #[cfg(test)]
 pub const REFERENCE: Reference = Reference {
-    size: [14.0, 7.0],
+    size: [14.0, 10.5],
     settings: &[],
     cases: &[Case {
         name: "Console Color",
@@ -36,6 +37,7 @@ pub const REFERENCE: Reference = Reference {
             row(8, Widget::Knob, "Drive", [5.6, 3.5, 2.8, 3.5]).p(8),
             row(9, Widget::Knob, "Mix", [8.4, 3.5, 2.8, 3.5]).p(9),
             row(10, Widget::Knob, "Output Gain", [11.2, 3.5, 2.8, 3.5]).p(10),
+            row(11, Widget::Spinner, "Native Codec", [0.0, 7.0, 14.0, 3.5]).p(11),
         ],
         ..Case::DEFAULT
     }],
