@@ -37,7 +37,6 @@ pub mod pitcher2;
 pub mod playback;
 mod reverbs;
 pub mod sample;
-pub mod tempo_detect;
 pub mod sample_edit;
 pub mod sequencer;
 pub mod slicer;
@@ -47,6 +46,7 @@ pub mod supersaw;
 #[cfg(all(any(target_os = "android", target_os = "linux"), feature = "surge-xt"))]
 pub mod surge_xt;
 mod tape_stop;
+pub mod tempo_detect;
 pub mod three_osc;
 pub mod transistor_bass;
 pub mod vocal_tune;
