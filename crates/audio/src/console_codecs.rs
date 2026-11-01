@@ -25,30 +25,42 @@ fn float_pcm(v: f32) -> i16 {
 }
 
 // BRR: 9 bytes / 16 samples, 4-bit residuals, shift and 4 prediction filters.
-// We deliberately avoid hardware-specific wrap glitches in this codec stage;
-// the 15-bit DSP clipping/wrap and Gaussian voice interpolator are separate work.
+// Histories are kept in the S-DSP's signed 15-bit internal format. Unlike the
+// older coloration approximation, arithmetic shifts and 15-bit wrap match
+// hardware. Pitch-dependent Gaussian voice interpolation is a separate stage.
 fn brr_predict(filter: usize, h: [i32; 2]) -> i32 {
     let a = h[0];
     let b = h[1];
     match filter {
-        1 => (a * 15) >> 4,
-        2 => ((a * 61) >> 5) - ((b * 15) >> 4),
-        3 => ((a * 115) >> 6) - ((b * 13) >> 4),
+        1 => a + ((-a) >> 4),
+        2 => (a << 1) + ((-3 * a) >> 5) - b + (b >> 4),
+        3 => (a << 1) + ((-13 * a) >> 6) - b + ((3 * b) >> 4),
         _ => 0,
     }
 }
 
+fn brr_sample(nibble: i32, shift: u8, filter: usize, hist: &mut [i32; 2]) -> i16 {
+    let residual = if shift > 12 {
+        (nibble >> 3) << 11
+    } else {
+        (nibble << shift) >> 1
+    };
+    // The S-DSP wraps the 16-bit intermediate into a signed 15-bit value.
+    let intermediate = (residual as i16).wrapping_add(brr_predict(filter, *hist) as i16);
+    let internal = ((intermediate << 1) >> 1) as i32;
+    hist[1] = hist[0];
+    hist[0] = internal;
+    (internal << 1) as i16
+}
+
 pub fn decode_brr(block: &[u8; 9], hist: &mut [i32; 2]) -> [i16; 16] {
     let filter = ((block[0] >> 2) & 3) as usize;
-    let shift = (block[0] >> 4).min(12);
+    let shift = block[0] >> 4;
     let mut out = [0i16; 16];
     for (i, dst) in out.iter_mut().enumerate() {
         let byte = block[1 + i / 2];
         let n = if i & 1 == 0 { byte >> 4 } else { byte & 15 };
-        let sample = pcm((signed_nibble(n) << shift) + brr_predict(filter, *hist));
-        hist[1] = hist[0];
-        hist[0] = sample as i32;
-        *dst = sample;
+        *dst = brr_sample(signed_nibble(n), shift, filter, hist);
     }
     out
 }
@@ -61,14 +73,13 @@ pub fn encode_brr(input: &[i16; 16], hist: [i32; 2]) -> [u8; 9] {
             let mut state = hist;
             let mut candidate = [0u8; 9];
             candidate[0] = ((shift << 4) | (filter << 2)) as u8;
-            let step = (1 << shift) as f32;
+            let step = (2.0f32).powi(shift - 1);
             let mut error = 0.0f64;
             for (i, &target) in input.iter().enumerate() {
                 let prediction = brr_predict(filter, state);
-                let q = ((target as f32 - prediction as f32) / step).round().clamp(-8.0, 7.0) as i32;
-                let reconstructed = pcm(prediction + (q << shift)) as i32;
-                state[1] = state[0];
-                state[0] = reconstructed;
+                let q = ((target as f32 * 0.5 - prediction as f32) / step)
+                    .round().clamp(-8.0, 7.0) as i32;
+                let reconstructed = brr_sample(q, shift as u8, filter, &mut state);
                 error += (target as f64 - reconstructed as f64).powi(2);
                 let byte = &mut candidate[1 + i / 2];
                 if i & 1 == 0 { *byte = (q as u8 & 15) << 4; }
@@ -364,6 +375,34 @@ mod tests {
                 assert_eq!(r, 0.0);
             }
         }
+    }
+
+    #[test]
+    fn snes_brr_reference_shift_filter_and_wrap() {
+        let mut hist = [0; 2];
+        let mut block = [0u8; 9];
+        block[1] = 0x7f;
+        // Shift zero discards the lowest bit, high nibble is decoded first.
+        let out = decode_brr(&block, &mut hist);
+        assert_eq!(&out[..2], &[6, -2]);
+
+        let mut hist = [0; 2];
+        block[0] = 0x14; // range 1, predictor 1
+        block[1] = 0x70;
+        let out = decode_brr(&block, &mut hist);
+        assert_eq!(&out[..2], &[14, 12]);
+
+        // Values above the hardware's 15-bit range wrap, not clamp.
+        let mut hist = [0; 2];
+        block = [0; 9];
+        block[0] = 0xc0; // range 12, predictor 0
+        block[1] = 0x70;
+        let out = decode_brr(&block, &mut hist);
+        assert_eq!(out[0], 28_672);
+        block[0] = 0xd0; // out-of-range shifts behave as special cases
+        block[1] = 0x80;
+        let out = decode_brr(&block, &mut [0; 2]);
+        assert_eq!(out[0], -4_096);
     }
 
     #[test]
