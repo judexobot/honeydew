@@ -1,7 +1,7 @@
 name: Surge XT · original native Android instrument
 on:
   push:
-    branches: [feature/surge-xt-native-instrument]
+    branches: [feature/surge-xt-native-instrument, feature/console-color-real-codecs-v3]
   workflow_dispatch:
 permissions:
   contents: read
@@ -39,6 +39,12 @@ jobs:
         run: |
           cargo test -p honeydew-audio --locked --test vocal_tune --test vocal_tune_spectral --test pitcher --test pitcher2
           cargo test -p honeydew-audio --locked --test rt_alloc vocal_tune_and_gameboy_callbacks_allocate_nothing
+      - name: Real console block codecs and Console Color compatibility
+        if: matrix.runner == 'ubuntu-24.04'
+        run: |
+          cargo test -p honeydew-audio --locked --lib console_codecs
+          cargo test -p honeydew-audio --locked --lib console_color
+          cargo test -p honeydew-audio --locked --test effects console_color
       - name: Other instrument and application regressions
         if: matrix.runner == 'ubuntu-24.04'
         run: cargo test --workspace --lib --locked
@@ -87,7 +93,7 @@ jobs:
       - name: Upload actual Surge XT-powered Android APK
         uses: actions/upload-artifact@v4
         with:
-          name: Honeydew-042-Original-Surge-XT-Android-ARM64
+          name: Honeydew-042-SurgeXT-ConsoleColor-v3-Android-ARM64
           path: target/honeydew-android-*-arm64-debug.apk
           if-no-files-found: error
           retention-days: 7
