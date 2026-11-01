@@ -5,6 +5,7 @@ pub mod builtin_drums;
 pub mod builtin_loops;
 pub mod builtin_shapes;
 mod comb;
+pub mod console_codecs;
 pub mod console_color;
 pub mod device;
 pub mod drums;
