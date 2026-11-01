@@ -155,29 +155,38 @@ const N64_PAIRS: [[i32; 2]; 4] = [
     [0, 0], [1536, 0], [3072, -1229], [3584, -1638],
 ];
 
-fn n64_matrix(predictor: usize) -> [[i32; 10]; 8] {
+// Generate codebook interpolation matrices at compile time; previously each
+// RSP-style encoded 16-sample block rebuilt these matrices 52 times.
+const fn n64_matrix(predictor: usize) -> [[i32; 10]; 8] {
     let [a, b] = N64_PAIRS[predictor];
-    let mut m = [[0; 10]; 8];
-    for i in 0..8 {
-        // Indexing previous rows is required to build the causal prediction matrix.
-        // Iterate mutable coefficients to satisfy strict Clippy without changing DSP.
-        let (past, future) = m.split_at_mut(i);
-        let row = &mut future[0];
-        for (j, coefficient) in row.iter_mut().enumerate() {
+    let mut matrix = [[0; 10]; 8];
+    let mut i = 0;
+    while i < 8 {
+        let mut j = 0;
+        while j < 10 {
             let prev = if i == 0 {
                 if j == 1 { 2048 } else { 0 }
-            } else { past[i - 1][j] };
+            } else { matrix[i - 1][j] };
             let older = if i == 0 {
                 if j == 0 { 2048 } else { 0 }
             } else if i == 1 {
                 if j == 1 { 2048 } else { 0 }
-            } else { past[i - 2][j] };
-            *coefficient = (a * prev + b * older) >> 11;
+            } else { matrix[i - 2][j] };
+            matrix[i][j] = (a * prev + b * older) >> 11;
+            j += 1;
         }
-        row[2 + i] += 2048;
+        matrix[i][2 + i] += 2048;
+        i += 1;
     }
-    m
+    matrix
 }
+
+const N64_MATRICES: [[[i32; 10]; 8]; 4] = [
+    n64_matrix(0),
+    n64_matrix(1),
+    n64_matrix(2),
+    n64_matrix(3),
+];
 
 fn n64_dot(row: &[i32; 10], values: &[i32; 10]) -> i32 {
     let sum: i64 = row.iter().zip(values).map(|(&a, &b)| i64::from(a) * i64::from(b)).sum();
@@ -189,7 +198,7 @@ fn n64_dot(row: &[i32; 10], values: &[i32; 10]) -> i32 {
 pub fn vadpcm_codebook() -> [[[i16; 8]; 2]; 4] {
     let mut codebook = [[[0i16; 8]; 2]; 4];
     for (p, entry) in codebook.iter_mut().enumerate() {
-        let matrix = n64_matrix(p);
+        let matrix = &N64_MATRICES[p];
         for (i, row) in matrix.iter().enumerate() {
             entry[0][i] = pcm(row[0]);
             entry[1][i] = pcm(row[1]);
@@ -203,7 +212,7 @@ pub fn decode_vadpcm(block: &[u8; 9], hist: &mut [i32; 2]) -> [i16; 16] {
     let mut out = [0i16; 16];
     if predictor >= N64_PAIRS.len() { return out; }
     let shift = (block[0] >> 4).min(12);
-    let matrix = n64_matrix(predictor);
+    let matrix = &N64_MATRICES[predictor];
     let mut state = *hist;
     for half in 0..2 {
         let mut values = [0i32; 10];
@@ -227,7 +236,7 @@ pub fn decode_vadpcm(block: &[u8; 9], hist: &mut [i32; 2]) -> [i16; 16] {
 fn encode_n64_candidate(input: &[i16; 16], hist: [i32; 2], predictor: usize, shift: u8)
     -> ([u8; 9], f64)
 {
-    let matrix = n64_matrix(predictor);
+    let matrix = &N64_MATRICES[predictor];
     let mut state = hist;
     let mut block = [0u8; 9];
     block[0] = (shift << 4) | predictor as u8;
