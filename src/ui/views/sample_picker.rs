@@ -337,6 +337,7 @@ fn pick(
             let lost = |_| Decoded {
                 samples: SampleCache::default(),
                 wave: None,
+                bpm: None,
                 error: Some(WORKER_LOST.into()),
             };
             let (path, _) = state.loading.take().expect("loading");
