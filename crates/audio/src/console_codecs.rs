@@ -68,7 +68,7 @@ pub fn decode_brr(block: &[u8; 9], hist: &mut [i32; 2]) -> [i16; 16] {
 pub fn encode_brr(input: &[i16; 16], hist: [i32; 2]) -> [u8; 9] {
     let mut best = [0u8; 9];
     let mut best_error = f64::INFINITY;
-    for filter in 0..4 {
+    for filter in 0usize..4 {
         for shift in 0..=12 {
             let mut state = hist;
             let mut candidate = [0u8; 9];
