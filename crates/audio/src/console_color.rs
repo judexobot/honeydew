@@ -2,9 +2,10 @@
 //! A *post-processing approximation*, not an emulation of game-console sample players.
 //! SNES BRR, PS1 SPU ADPCM, N64 RSP microcode and GBA FIFO behavior require source-aware emulators.
 //! Callback-safe: every buffer is allocated in new(), never in process_frame/refresh/reset.
-pub const PARAM_COUNT: usize = 11;
+use crate::console_codecs::{CodecKind, StereoCodec};
+pub const PARAM_COUNT: usize = 12;
 pub const DEFAULTS: [f32; PARAM_COUNT] = [
-    1.0, 0.0, 0.0, 0.0, 0.5, 0.3, 0.35, 0.5, 0.12, 1.0, 0.5,
+    1.0, 0.0, 0.0, 0.0, 0.5, 0.3, 0.35, 0.5, 0.12, 1.0, 0.5, 0.0,
 ];
 const ECHO_CAP: usize = 32_768;
 
@@ -50,6 +51,7 @@ impl Console {
 #[derive(Clone, Copy)]
 struct Coeffs {
     mode: Console,
+    codec_on: bool,
     step: f64,
     pole: f32,
     steps: f32,
@@ -94,6 +96,7 @@ impl Coeffs {
         let drive = 1.0 + 4.0 * p[8];
         Self {
             mode,
+            codec_on: p[11] >= 0.5,
             step: f64::from(internal_rate / rate),
             pole: 1.0 - (-std::f32::consts::TAU * cutoff / rate).exp(),
             steps: 2.0_f32.powf(
@@ -127,6 +130,7 @@ pub struct ConsoleColor {
     params: [f32; PARAM_COUNT],
     low: [f32; 2],
     history: [[f32; 4]; 2],
+    codec: StereoCodec,
     coeffs: Coeffs,
     phase: f64,
     echo: Box<[[f32; 2]]>,
@@ -141,6 +145,7 @@ impl ConsoleColor {
             params: DEFAULTS,
             low: [0.0; 2],
             history: [[0.0; 4]; 2],
+            codec: StereoCodec::new(CodecKind::Brr),
             coeffs: Coeffs::calculate(&DEFAULTS, rate),
             phase: 1.0,
             echo: vec![[0.0; 2]; ECHO_CAP].into_boxed_slice(),
@@ -150,6 +155,7 @@ impl ConsoleColor {
     }
     pub fn refresh(&mut self, params: &[f32], sample_rate: f32) {
         let old_mode = self.console();
+        let old_codec_on = self.coeffs.codec_on;
         let rate = sample_rate.max(1.0);
         let changed_rate = self.rate != rate;
         self.rate = rate;
@@ -161,7 +167,7 @@ impl ConsoleColor {
         self.coeffs = Coeffs::calculate(&self.params, self.rate);
         // Avoid tails from an old console profile contaminating the new one.
         // Transition from dry audio over 8 ms, avoiding a discontinuous switch.
-        if changed_rate || old_mode != self.console() {
+        if changed_rate || old_mode != self.console() || old_codec_on != self.coeffs.codec_on {
             self.reset();
             self.mix = 0.0;
         }
@@ -169,12 +175,20 @@ impl ConsoleColor {
     pub fn reset(&mut self) {
         self.low = [0.0; 2];
         self.history = [[0.0; 4]; 2];
+        self.codec.reset(self.codec_kind());
         self.phase = 1.0;
         self.echo.fill([0.0; 2]);
         self.echo_at = 0;
         self.mix = self.params[9];
     }
     pub fn console(&self) -> Console { Console::from_param(self.params[1]) }
+    fn codec_kind(&self) -> CodecKind {
+        match self.console() {
+            Console::Snes | Console::Gba => CodecKind::Brr,
+            Console::N64 => CodecKind::Vadpcm,
+            Console::Ps1 => CodecKind::Vag,
+        }
+    }
 
     pub fn process_frame(&mut self, l: f32, r: f32) -> (f32, f32) {
         let c = self.coeffs;
@@ -189,9 +203,17 @@ impl ConsoleColor {
         self.phase += c.step;
         if self.phase >= 1.0 {
             self.phase -= self.phase.floor();
-            for (history, filtered) in self.history.iter_mut().zip(self.low) {
+            let quantized = self.low.map(|sample| (sample * c.steps).round() / c.steps);
+            // Encode/decode at the console's sample clock, not once per host frame.
+            // GBA Direct Sound uses PCM, not BRR/VAG/VADPCM.
+            let native = if c.codec_on && c.mode != Console::Gba {
+                self.codec.process(quantized[0], quantized[1])
+            } else {
+                quantized
+            };
+            for (history, filtered) in self.history.iter_mut().zip(native) {
                 history.copy_within(1..4, 0);
-                history[3] = (filtered * c.steps).round() / c.steps;
+                history[3] = filtered;
             }
         }
         let t = self.phase as f32;
