@@ -76,7 +76,9 @@ import json
 import sys
 import zipfile
 
-with zipfile.ZipFile(sys.argv[1]) as apk:
+# Android APK names are UTF-8 even when AAPT2 omits the ZIP UTF-8 flag.
+# Python otherwise decodes the original µcomputer.fxp name as CP437.
+with zipfile.ZipFile(sys.argv[1], metadata_encoding='utf-8') as apk:
     native_libs = ['libhoneydew.so', 'libc++_shared.so']
     if __import__('os').environ.get('HONEYDEW_SURGE_XT') == '1':
         native_libs.append('libhoneydew_surge_xt.so')
