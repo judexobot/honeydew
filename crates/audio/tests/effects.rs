@@ -1338,7 +1338,7 @@ fn filter_spreader_and_multifx_are_unchanged_at_44_1_khz_and_above() {
 #[test]
 fn console_color_is_a_live_audio_effect_with_four_profiles() {
     let info = effect_info(56).expect("Console Color is registered");
-    assert_eq!(info.parameter_count, 11);
+    assert_eq!(info.parameter_count, 12);
     let mut totals = [0.0_f32; 4];
     for (mode, total) in totals.iter_mut().enumerate() {
         let mut effect = AudioEffect::new(56, CTX.sample_rate).unwrap();
