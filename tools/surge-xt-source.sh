@@ -4,12 +4,28 @@
 set -euo pipefail
 SURGE_REV=5a4828a33ac4b2e2b45671b34e9e0e3f0c614765
 SURGE_SRC="${SURGE_SRC:-$TARGET/surge-xt-source}"
+SURGE_UPSTREAM=https://github.com/surge-synthesizer/surge.git
+# rust-cache recursively removes non-Cargo files under target/. An empty .git
+# directory then makes `git -C` discover Honeydew's parent repository instead.
+# Validate the checkout root as well as its origin before any fetch or mutation.
+if [ -e "$SURGE_SRC" ]; then
+  source_root="$(git -C "$SURGE_SRC" rev-parse --show-toplevel 2>/dev/null || true)"
+  source_origin="$(git -C "$SURGE_SRC" config --local --get remote.origin.url 2>/dev/null || true)"
+  if [ "$source_root" != "$(cd "$SURGE_SRC" && pwd -P)" ] || [ "$source_origin" != "$SURGE_UPSTREAM" ]; then
+    if [ "$SURGE_SRC" != "$TARGET/surge-xt-source" ]; then
+      echo "SURGE_SRC must be its own checkout of the official Surge repository" >&2
+      return 1
+    fi
+    echo "Discarding incomplete cached Surge dependency; restoring verified upstream"
+    rm -rf -- "$SURGE_SRC"
+  fi
+fi
 if [ ! -d "$SURGE_SRC/.git" ]; then
   mkdir -p "$SURGE_SRC"
   git -C "$SURGE_SRC" init
-  git -C "$SURGE_SRC" remote add origin https://github.com/surge-synthesizer/surge.git
+  git -C "$SURGE_SRC" remote add origin "$SURGE_UPSTREAM"
 fi
-test "$(git -C "$SURGE_SRC" remote get-url origin)" = https://github.com/surge-synthesizer/surge.git
+echo "Verified official Surge source checkout"
 if ! git -C "$SURGE_SRC" cat-file -e "$SURGE_REV^{commit}" 2>/dev/null; then
   git -C "$SURGE_SRC" fetch --depth 1 origin "$SURGE_REV"
 fi
