@@ -313,6 +313,54 @@ mod tests {
         assert_ne!(snes, gba);
     }
     #[test]
+    fn optional_native_codec_keeps_legacy_sound_and_gba_pcm() {
+        // Old saved projects omit parameter 11 and must retain their sound.
+        assert_eq!(DEFAULTS[11], 0.0);
+        let mut disabled = ConsoleColor::new(48_000.0);
+        let mut enabled = ConsoleColor::new(48_000.0);
+        let mut p = DEFAULTS;
+        p[1] = 1.0 / 3.0; // GBA never sends PCM through a foreign ADPCM codec
+        p[5] = 0.0;
+        disabled.refresh(&p, 48_000.0);
+        disabled.reset();
+        p[11] = 1.0;
+        enabled.refresh(&p, 48_000.0);
+        enabled.reset();
+        for i in 0..4096 {
+            let sample = (i as f32 * 0.037).sin() * 0.7;
+            let a = disabled.process_frame(sample, -sample * 0.5);
+            let b = enabled.process_frame(sample, -sample * 0.5);
+            assert!((a.0 - b.0).abs() < 1e-6);
+            assert!((a.1 - b.1).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn native_codecs_are_opt_in_distinct_and_finite() {
+        for console in [0, 2, 3] {
+            let mut dry = ConsoleColor::new(48_000.0);
+            let mut coded = ConsoleColor::new(48_000.0);
+            let mut p = DEFAULTS;
+            p[1] = console as f32 / 3.0;
+            p[5] = 0.0;
+            dry.refresh(&p, 48_000.0);
+            dry.reset();
+            p[11] = 1.0;
+            coded.refresh(&p, 48_000.0);
+            coded.reset();
+            let mut difference = 0.0;
+            for i in 0..4096 {
+                let sample = (i as f32 * 0.073).sin() * 0.6;
+                let (a, _) = dry.process_frame(sample, -sample);
+                let (b, right) = coded.process_frame(sample, -sample);
+                assert!(b.is_finite() && right.is_finite());
+                difference += (a - b).abs();
+            }
+            assert!(difference > 0.1, "native codec should change profile {console}");
+        }
+    }
+
+    #[test]
     fn bypass_mix_is_identity_at_unity_gain() {
         let mut fx = ConsoleColor::new(48_000.0);
         let mut p = DEFAULTS; p[9] = 0.0;
