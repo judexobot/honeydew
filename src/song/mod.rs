@@ -3,6 +3,7 @@
 //! mutability, everything `Clone + Debug + PartialEq`.
 
 mod channel;
+pub mod auto_bpm;
 pub mod chords;
 mod drum_kit;
 mod file;
