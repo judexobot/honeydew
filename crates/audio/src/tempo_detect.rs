@@ -100,8 +100,8 @@ pub fn detect(sample: &SampleData) -> Option<TempoEstimate> {
         let bpm = actual_hz * 60.0 / lag as f64;
         // A very small preference resolves octave ties toward the usual musical
         // beat range. This must not overrule a substantially better correlation.
-        let preference = if (85.0..=170.0).contains(&bpm) {
-            1.035
+        let preference = if (110.0..=210.0).contains(&bpm) {
+            1.05
         } else {
             1.0
         };
