@@ -96,6 +96,29 @@ def main():
         for directory in ["patches_factory", "wavetables", "impulses_factory", "tuning_library"]:
             shutil.copytree(args.source / "resources/data" / directory, assets / directory)
         shutil.copyfile(args.source / "LICENSE", assets / "Surge-XT-LICENSE.txt")
+        shutil.copyfile(args.source / "AUTHORS", assets / "Surge-XT-AUTHORS.txt")
+        # Preserve notices for the original linked dependencies. These small
+        # text files do not include desktop UI resources or executable code.
+        license_files = [
+            "libs/airwindows/LICENSE", "libs/binn/LICENSE", "libs/fmt/LICENSE",
+            "libs/eurorack/eurorack/stmlib/LICENSE", "libs/luajitlib/LuaJIT/COPYRIGHT",
+            "libs/PEGTL/LICENSE", "libs/r8brain-free-src/LICENSE", "libs/simde/COPYING",
+            "libs/tuning-library/LICENSE.md", "libs/zstd/LICENSE", "libs/zstd/COPYING",
+            "libs/sst/sst-basic-blocks/LICENSE.md", "libs/sst/sst-cpputils/LICENSE.md",
+            "libs/sst/sst-effects/LICENSE.md", "libs/sst/sst-filters/LICENSE.md",
+            "libs/sst/sst-waveshapers/LICENSE.md", "libs/sst/sst-plugininfra/LICENSE.md",
+            "libs/sst/sst-plugininfra/LICENSE_MIT.md",
+            "libs/sst/sst-plugininfra/libs/miniz/LICENSE",
+            "libs/sst/sst-plugininfra/libs/filesystem/ghc-filesystem/LICENSE",
+        ]
+        for relative in license_files:
+            destination = assets / "licenses" / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(args.source / relative, destination)
+        pffft_notice = (args.source / "libs/pffft/pffft.h").read_text().split("*/", 1)[0] + "*/\n"
+        (assets / "licenses/PFFFT-FFTPACK.txt").write_text(pffft_notice)
+        shutil.copyfile(args.source / "libs/sst/sst-plugininfra/libs/tinyxml/readme.txt",
+                        assets / "licenses/TinyXML.txt")
         shutil.copyfile(out / "factory-bank.json", assets / "factory-bank.json")
         entries = []
         for path in sorted(p for p in assets.rglob("*") if p.is_file()):

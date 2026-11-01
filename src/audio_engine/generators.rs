@@ -181,7 +181,7 @@ pub(super) fn build(
             let built = instrument(channel, module, sample_rate, samples, time_sig, &mut origin);
             let Some(mut instrument) = built else {
                 // A plugin that is not running is reported by the host.
-                if !crate::song::plugin::is_plugin(module.type_id) {
+                if module.type_id != 57 && !crate::song::plugin::is_plugin(module.type_id) {
                     log_silent(module.type_id);
                 }
                 return None;

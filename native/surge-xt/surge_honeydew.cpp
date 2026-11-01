@@ -129,6 +129,10 @@ struct Instance {
         if (synth) synth->storage.removeErrorListener(&host);
     }
 };
+void operationFailed(void *handle, const char *detail) noexcept {
+    if (handle) ++static_cast<Instance *>(handle)->state.faults;
+    error("D", detail);
+}
 } // namespace
 
 // Platform-path adapter used by sst-plugininfra on Android (and the native QA
@@ -221,36 +225,44 @@ HONEYDEW_EXPORT void honeydew_surge_note_off(void *handle, uint8_t channel, uint
         ++instance.state.note_offs;
         instance.synth->releaseNote(
             static_cast<char>(channel & 15), static_cast<char>(key & 127), 0);
-    } catch (...) {}
+    } catch (const std::exception &e) { operationFailed(handle, e.what()); }
+    catch (...) { operationFailed(handle, "Unknown Note Off exception"); }
 }
 HONEYDEW_EXPORT void honeydew_surge_panic(void *handle) noexcept {
     if (!handle) return;
     // Host reset is immediate. allSoundOff() instead queues an eight-block
     // fade and can kill a NEW note played just after Enable is switched on.
-    try { static_cast<Instance *>(handle)->synth->stopSound(); } catch (...) {}
+    try { static_cast<Instance *>(handle)->synth->stopSound(); }
+    catch (const std::exception &e) { operationFailed(handle, e.what()); }
+    catch (...) { operationFailed(handle, "Host reset failed"); }
 }
 HONEYDEW_EXPORT void honeydew_surge_all_notes_off(void *handle) noexcept {
     if (!handle) return;
-    try { static_cast<Instance *>(handle)->synth->allNotesOff(); } catch (...) {}
+    try { static_cast<Instance *>(handle)->synth->allNotesOff(); }
+    catch (const std::exception &e) { operationFailed(handle, e.what()); }
+    catch (...) { operationFailed(handle, "All Notes Off failed"); }
 }
 HONEYDEW_EXPORT void honeydew_surge_cc(void *handle, uint8_t channel, uint8_t cc, uint8_t value) noexcept {
     if (!handle) return;
     try {
         static_cast<Instance *>(handle)->synth->channelController(
             static_cast<char>(channel & 15), cc & 127, value & 127);
-    } catch (...) {}
+    } catch (const std::exception &e) { operationFailed(handle, e.what()); }
+    catch (...) { operationFailed(handle, "MIDI controller failed"); }
 }
 HONEYDEW_EXPORT void honeydew_surge_pitch_bend(void *handle, uint8_t channel, int bend14) noexcept {
     if (!handle) return;
     try {
         static_cast<Instance *>(handle)->synth->pitchBend(
             static_cast<char>(channel & 15), std::clamp(bend14, 0, 16383) - 8192);
-    } catch (...) {}
+    } catch (const std::exception &e) { operationFailed(handle, e.what()); }
+    catch (...) { operationFailed(handle, "MIDI pitch bend failed"); }
 }
 HONEYDEW_EXPORT void honeydew_surge_aftertouch(void *handle, uint8_t channel, uint8_t pressure) noexcept {
     if (!handle) return;
     try { static_cast<Instance *>(handle)->synth->channelAftertouch(channel & 15, pressure & 127); }
-    catch (...) { error("D", "Channel pressure failed"); }
+    catch (const std::exception &e) { operationFailed(handle, e.what()); }
+    catch (...) { operationFailed(handle, "Channel pressure failed"); }
 }
 HONEYDEW_EXPORT void honeydew_surge_native_param(void *handle, int which, float value) noexcept {
     if (!handle || which < 0 || which >= kParameterCount || !std::isfinite(value)) return;
@@ -261,7 +273,8 @@ HONEYDEW_EXPORT void honeydew_surge_native_param(void *handle, int which, float 
         if (instance.synth->fromSynthSideId(id, parameter)) {
             instance.synth->setParameter01(parameter, std::clamp(value, 0.f, 1.f), true);
         }
-    } catch (...) {}
+    } catch (const std::exception &e) { operationFailed(handle, e.what()); }
+    catch (...) { operationFailed(handle, "Native parameter update failed"); }
 }
 // Called from the Honeydew app's instrument constructor, never from its
 // realtime callback. The pack is the 641 official factory FXP payloads.
@@ -283,7 +296,8 @@ HONEYDEW_EXPORT void honeydew_surge_macro(void *handle, int which, float value) 
     try {
         static_cast<Instance *>(handle)->synth->setMacroParameter01(
             which, std::clamp(value, 0.0f, 1.0f));
-    } catch (...) {}
+    } catch (const std::exception &e) { operationFailed(handle, e.what()); }
+    catch (...) { operationFailed(handle, "Macro update failed"); }
 }
 // Android runtime audio self-check. The original Init Saw patch must produce
 // non-zero PCM with a standard note; this runs at instrument startup (not in
@@ -329,7 +343,10 @@ static int render32_core(void *handle, float *left, float *right,
     try {
         auto &instance = *static_cast<Instance *>(handle);
         auto &s = *instance.synth;
-        if (instance.state.faults) throw std::runtime_error("A prior native MIDI/render operation failed");
+        if (instance.state.faults) {
+            std::fill_n(left, BLOCK_SIZE, 0.f); std::fill_n(right, BLOCK_SIZE, 0.f);
+            return 0; // Keep the first concrete native error for the UI.
+        }
         if (std::isfinite(bpm) && bpm > 0) s.time_data.tempo = bpm;
         if (std::isfinite(ppq)) s.time_data.ppqPos = ppq;
         s.time_data.isPlaying = playing != 0;

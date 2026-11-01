@@ -28,6 +28,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: surge-audio-${{ matrix.runner }}
+          cache-on-failure: true
       - name: Native audio build dependencies
         run: |
           sudo apt-get update

@@ -31,9 +31,8 @@ set_target_properties(honeydew_surge_xt PROPERTIES
   CXX_VISIBILITY_PRESET hidden
   VISIBILITY_INLINES_HIDDEN YES
 )
-# The C symbols are exported explicitly; Surge's C++ internals stay hidden.
-set_source_files_properties("${HONEYDEW_SURGE_DIR}/native/surge-xt/surge_honeydew.cpp"
-  PROPERTIES COMPILE_OPTIONS "-fvisibility=default")
+# The ABI and JNI entry points carry explicit default visibility. Keep all
+# implementation/template symbols hidden, including those in this bridge.
 
 option(HONEYDEW_SURGE_TESTS "Build audio tests using the real Surge engine" OFF)
 if(HONEYDEW_SURGE_TESTS)

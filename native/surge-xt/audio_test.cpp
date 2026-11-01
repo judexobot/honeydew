@@ -61,7 +61,7 @@ Audio render(void *handle, SurgeSynthesizer *reference, int blocks, bool playing
                     left.back() == -54321.f && right.back() == -54321.f,
                     "32-frame C ABI overwrote a buffer canary");
             for (int i = 1; i <= 32; ++i) audio.add(left[i], right[i]);
-        } else {
+        } else if (reference) {
             reference->process_input = input;
             if (input) {
                 std::copy(inL.begin(), inL.end(), reference->input[0]);
@@ -75,6 +75,8 @@ Audio render(void *handle, SurgeSynthesizer *reference, int blocks, bool playing
             reference->process();
             for (int i = 0; i < 32; ++i)
                 audio.add(reference->output[0][i], reference->output[1][i]);
+        } else {
+            throw std::runtime_error("Audio QA needs a native handle or an official reference");
         }
     }
     return audio;
@@ -182,6 +184,7 @@ int main(int argc, char **argv) {
         std::ofstream report(fs::path(argv[3]) / "factory-audio.tsv");
         report << "index\tpath\tpeak\trms\treference_peak\tmax_sample_difference\tstatus\n";
         std::set<std::string> categories;
+        std::vector<int> variations;
         int audible = 0, exact = 0, silent = 0, inputRequired = 0;
         for (int preset = 1; preset <= honeydew_surge_factory_count; ++preset) {
             const auto &entry = honeydew_surge_factory[preset - 1];
@@ -256,6 +259,7 @@ int main(int argc, char **argv) {
             }
             const auto status = withInput ? "audible_requires_audio_input" : "audible";
             if (difference < 1e-5f) ++exact;
+            else variations.push_back(preset);
             if (audio.peak > 1e-7f) ++audible; else ++silent;
             if (categories.insert(category).second) wav(fs::path(argv[3]) / (category + ".wav"), audio);
             honeydew_surge_all_notes_off(bridge.get()); reference->allNotesOff();
@@ -269,11 +273,62 @@ int main(int argc, char **argv) {
             if (preset % 25 == 0) std::cout << "Validated original audio " << preset << "/641\n" << std::flush;
         }
         reference->storage.removeErrorListener(&referenceHost);
+        // Check differing patches against two independent official instances,
+        // separating engine randomness/history from a bridge discrepancy.
+        std::ofstream variationReport(fs::path(argv[3]) / "reference-variations.tsv");
+        variationReport << "path\tfresh_bridge_difference\tofficial_instance_difference\tresult\n";
+        int freshMatches = 0;
+        for (int preset : variations) {
+            const std::string path = honeydew_surge_factory[preset - 1].path;
+            const auto source = fs::path(argv[1]) / "patches_factory" / path;
+            auto fresh = std::make_unique<Instance>(48000.f);
+            Host h1, h2;
+            auto makeReference = [&](Host &host) {
+                auto r = std::make_unique<SurgeSynthesizer>(&host, SurgeStorage::skipPatchLoadDataPathSentinel);
+                r->storage.datapath = string_to_path(argv[1]);
+                r->storage.refresh_wtlist(); r->storage.refresh_irlist();
+                r->setSamplerate(48000);
+                r->time_data.tempo = 120; r->time_data.ppqPos = 0;
+                r->time_data.timeSigNumerator = r->time_data.timeSigDenominator = 4;
+                r->resetStateFromTimeData();
+                const auto init = fs::path(argv[1]) / "patches_factory/Templates/Init Saw.fxp";
+                require(r->loadPatchByPath(path_to_string(init).c_str(), -1, "Init Saw", false), "Reference init failed");
+                r->processAudioThreadOpsWhenAudioEngineUnavailable(true); r->processControl();
+                r->audio_processing_active = true;
+                seed(*r, 1234);
+                require(r->loadPatchByPath(path_to_string(source).c_str(), -1,
+                    path_to_string(source.stem()).c_str(), false), "Reference variation load failed");
+                r->processAudioThreadOpsWhenAudioEngineUnavailable(true); r->processControl();
+                return r;
+            };
+            seed(*fresh->synth, 1234);
+            require(honeydew_surge_load_factory(fresh.get(), preset), "Fresh factory load failed");
+            auto r1 = makeReference(h1), r2 = makeReference(h2);
+            const auto category = path.substr(0, path.find('/'));
+            const int blocks = (category == "Pads" || category == "FX" || category == "Sequences") ? 9000 : 4500;
+            seed(*fresh->synth, 5678); honeydew_surge_note_on(fresh.get(), 0, 60, 112);
+            auto a = render(fresh.get(), nullptr, blocks, preset % 2 == 0);
+            seed(*r1, 5678); r1->playNote(0, 60, 112, 0);
+            auto b = render(nullptr, r1.get(), blocks, preset % 2 == 0);
+            seed(*r2, 5678); r2->playNote(0, 60, 112, 0);
+            auto c = render(nullptr, r2.get(), blocks, preset % 2 == 0);
+            float ab = 0, bc = 0;
+            for (size_t i = 0; i < a.pcm.size(); ++i) {
+                ab = std::max(ab, std::abs(a.pcm[i] - b.pcm[i]));
+                bc = std::max(bc, std::abs(b.pcm[i] - c.pcm[i]));
+            }
+            require(ab < 1e-5f || bc >= 1e-5f,
+                    path + " differs only in the bridge, not between original instances");
+            if (ab < 1e-5f) ++freshMatches;
+            variationReport << path << '\t' << ab << '\t' << bc << '\t'
+                << (ab < 1e-5f ? "fresh_matches_official" : "independent_official_instances_vary") << '\n';
+        }
         const auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
         std::ofstream summary(fs::path(argv[3]) / "summary.json");
         summary << "{\"presets\":641,\"audible\":" << audible << ",\"audio_input_required\":"
                 << inputRequired << ",\"silent_matching_official\":"
                 << silent << ",\"sample_matches_below_1e-5\":" << exact
+                << ",\"fresh_sample_matches\":" << freshMatches
                 << ",\"categories\":" << categories.size() << ",\"elapsed_seconds\":" << seconds << "}\n";
         std::cout << "PASS: 641 complete FXPs, " << audible << " audible, " << silent
                   << " silent under the same conditions in official Surge; " << exact
