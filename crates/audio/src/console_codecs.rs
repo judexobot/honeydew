@@ -148,14 +148,22 @@ fn n64_matrix(predictor: usize) -> [[i32; 10]; 8] {
     let [a, b] = N64_PAIRS[predictor];
     let mut m = [[0; 10]; 8];
     for i in 0..8 {
-        for j in 0..10 {
-            let prev = if i == 0 { if j == 1 { 2048 } else { 0 } } else { m[i - 1][j] };
-            let older = if i == 0 { if j == 0 { 2048 } else { 0 } }
-                else if i == 1 { if j == 1 { 2048 } else { 0 } }
-                else { m[i - 2][j] };
-            m[i][j] = (a * prev + b * older) >> 11;
+        // Indexing previous rows is required to build the causal prediction matrix.
+        // Iterate mutable coefficients to satisfy strict Clippy without changing DSP.
+        let (past, future) = m.split_at_mut(i);
+        let row = &mut future[0];
+        for (j, coefficient) in row.iter_mut().enumerate() {
+            let prev = if i == 0 {
+                if j == 1 { 2048 } else { 0 }
+            } else { past[i - 1][j] };
+            let older = if i == 0 {
+                if j == 0 { 2048 } else { 0 }
+            } else if i == 1 {
+                if j == 1 { 2048 } else { 0 }
+            } else { past[i - 2][j] };
+            *coefficient = (a * prev + b * older) >> 11;
         }
-        m[i][2 + i] += 2048;
+        row[2 + i] += 2048;
     }
     m
 }
