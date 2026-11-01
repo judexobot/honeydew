@@ -181,7 +181,7 @@ mod tests {
             let pos = (t * rate as f64) as usize;
             for k in 0..80 {
                 if let Some(sample) = left.get_mut(pos + k) {
-                    *sample += (1.0 - k as f32 / 80.0) * if (t / (60.0 / bpm)) as usize % 4 == 0 { 1.0 } else { 0.8 };
+                    *sample += (1.0 - k as f32 / 80.0) * if ((t / (60.0 / bpm)) as usize).is_multiple_of(4) { 1.0 } else { 0.8 };
                 }
             }
             t += 60.0 / bpm;
