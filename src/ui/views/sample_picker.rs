@@ -876,6 +876,46 @@ mod tests {
     }
 
     #[test]
+    fn audio_clip_import_estimates_missing_bpm_without_touching_project_tempo() {
+        use crate::sample_cache::tests::wav;
+
+        const RATE: usize = 44_100;
+        const SECONDS: usize = 10;
+        let mut pcm = vec![0i16; RATE * SECONDS];
+        let bpm = 128.0;
+        for beat in 0..22 {
+            let start = (beat as f64 * 60.0 / bpm * RATE as f64).round() as usize;
+            for k in 0..150 {
+                if let Some(frame) = pcm.get_mut(start + k) {
+                    *frame = (22000.0 * (1.0 - k as f64 / 150.0)) as i16;
+                }
+            }
+        }
+        let key = SampleKey::File(user_path("My Samples/DrumLoop.wav"));
+        let decoded = decode_pick(
+            key.clone(),
+            Ok(wav(&pcm)),
+            false,
+            Some(PickFor::Clip(SamplerSlot::default(), 120.0)),
+        );
+        assert!(decoded.error.is_none());
+        assert_eq!(decoded.wave.as_ref().unwrap().data.meta.tempo, None);
+        let result = decoded.bpm.expect("transients yield an estimated BPM");
+        assert!(!result.embedded);
+        assert!((result.bpm - 128.0).abs() < 1.2, "{result:?}");
+        assert!(result.confidence > 0.2);
+
+        // A drum pad is not analyzed as a loop.
+        let pad = decode_pick(
+            key,
+            Ok(wav(&pcm)),
+            false,
+            Some(PickFor::Pad(SamplerSlot::default())),
+        );
+        assert_eq!(pad.bpm, None);
+    }
+
+    #[test]
     fn load_sample_gives_the_rows_slot_the_files_path_folder_and_name_and_keeps_its_custom_name() {
         // On the desktop: an absolute path in the user folder.
         let user = PathBuf::from("/home/me/studio");
