@@ -12,6 +12,8 @@ const PARAMS: &[P] = &[
     P::cont("Drive", 0.12, Display::linear(0.0, 100.0, 0, "%")), // 8
     P::cont("Mix", 1.0, Display::linear(0.0, 100.0, 0, "%")), // 9
     P::cont("Output Gain", 0.5, Display::linear(-12.0, 12.0, 1, " dB")), // 10
+    // Appended to retain every existing control, automation lane and saved value.
+    P::menu("Native Codec", 0.0, &["Off", "On"]), // 11
 ];
 pub static MODULES: &[ModuleSpec] = &[ModuleSpec::effect(
     56, "Console Color", "Console Color", false, PARAMS, &[],
