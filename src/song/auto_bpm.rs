@@ -102,6 +102,25 @@ mod tests {
     }
 
     #[test]
+    fn survives_a_real_project_write_and_reload() {
+        use crate::song::{ChannelKind, Song};
+
+        let mut song = Song::default();
+        song.add_channel(ChannelKind::AudioClip);
+        let clip = song.channels[1].lanes[0].add_clip(0, 4.0);
+        let info = ClipBpm {
+            bpm: 127.83,
+            confidence: 0.87,
+            embedded: false,
+        };
+        write(clip, Some(info));
+        let bytes = crate::flm::write(&song).expect("write project");
+        let opened = crate::flm::read(&bytes).expect("open project");
+        assert_eq!(read(&opened.channels[1].lanes[0].clips[0]), Some(info));
+        assert_eq!(opened.tempo_bpm, 120.0, "the song tempo is independent");
+    }
+
+    #[test]
     fn ignores_corrupted_unknown_chunk_payloads() {
         let mut lane = Lane::new(LaneKind::Audio);
         let clip = lane.add_clip(0, 4.0);
