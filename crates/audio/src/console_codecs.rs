@@ -69,7 +69,7 @@ pub fn encode_brr(input: &[i16; 16], hist: [i32; 2]) -> [u8; 9] {
     let mut best = [0u8; 9];
     let mut best_error = f64::INFINITY;
     for filter in 0usize..4 {
-        for shift in 0..=12 {
+        for shift in 0i32..=12 {
             let mut state = hist;
             let mut candidate = [0u8; 9];
             candidate[0] = ((shift as u8) << 4) | ((filter as u8) << 2);
@@ -412,6 +412,35 @@ mod tests {
         block[1] = 0x80;
         let out = decode_brr(&block, &mut [0; 2]);
         assert_eq!(out[0], -4_096);
+    }
+
+    #[test]
+    fn ps1_spu_known_block_nibbles_and_flags() {
+        // SPU: filter 0, shift 0. Each low nibble precedes the high nibble.
+        let mut block = [0u8; 16];
+        block[2] = 0x7f;
+        let mut history = [12_000, -5_000];
+        let decoded = decode_vag(&block, &mut history);
+        assert_eq!(decoded[0], -4_096);
+        assert_eq!(decoded[1], 28_672);
+        assert_eq!(decoded[2], 0);
+        // Filter 0 must be independent of prior voice history.
+        assert_eq!(decode_vag(&block, &mut [0; 2]), decoded);
+        let encoded = encode_vag(&decoded, [0; 2]);
+        assert_eq!(encoded[1], 0, "continuous blocks must not set loop flags");
+    }
+
+    #[test]
+    fn n64_vadpcm_predictor_zero_known_nibbles() {
+        // 9-byte VADPCM: scale 0, predictor 0; high nibble decoded first.
+        let mut block = [0u8; 9];
+        block[1] = 0x7f;
+        let mut history = [6_000, -4_000];
+        let decoded = decode_vadpcm(&block, &mut history);
+        assert_eq!(&decoded[0..4], &[7, -1, 0, 0]);
+        assert_eq!(history, [0, 0]);
+        // Predictor 0 has no inter-frame dependency.
+        assert_eq!(decode_vadpcm(&block, &mut [0; 2]), decoded);
     }
 
     #[test]
