@@ -27,6 +27,7 @@ jobs:
         run: |
           cargo test -p honeydew-audio --locked --lib console_color
           cargo test -p honeydew-audio --locked --lib console_codecs
+          cargo test -p honeydew-audio --locked --test rt_alloc console_color_native_codecs_render_without_callback_allocations
           cargo test -p honeydew-audio --locked --test effects
       - name: UI registry, layout, instruments and saved projects
         run: |
