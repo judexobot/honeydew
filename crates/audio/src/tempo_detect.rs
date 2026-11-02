@@ -131,6 +131,34 @@ pub fn detect(sample: &SampleData) -> Option<TempoEstimate> {
             refined_score = correlation;
         }
     }
+    // Distinguish a real beat from its half-time autocorrelation peak.
+    // A rigid click track repeats every beat AND every two beats; in such
+    // material the two-beat peak can be slightly cleaner because consecutive
+    // attacks cross the 200 Hz analysis grid at different fractions. Prefer
+    // the shorter period only when its own correlation is also strong.
+    // Crucially, a real 64-BPM track with no intervening 128-BPM attacks
+    // has a weak half-lag correlation and stays at 64 BPM.
+    let faster_lag = refined * 0.5;
+    if faster_lag >= min_lag as f64 && actual_hz * 60.0 / faster_lag <= MAX_BPM {
+        let mut faster_score = 0.0f64;
+        let mut faster_refined = faster_lag;
+        for step in -8..=8 {
+            let candidate = faster_lag + step as f64 * 0.125;
+            if candidate < min_lag as f64 {
+                continue;
+            }
+            let score = correlate(&onsets, candidate);
+            if score > faster_score {
+                faster_score = score;
+                faster_refined = candidate;
+            }
+        }
+        if faster_score >= 0.78 && faster_score >= refined_score * 0.82 {
+            refined = faster_refined;
+            refined_score = faster_score;
+        }
+    }
+
     let bpm = actual_hz * 60.0 / refined;
     // Conservative score: regular repeated transients typically reach high
     // correlation; sparse/uneven material should not receive false certainty.
@@ -203,6 +231,19 @@ mod tests {
                 "wanted {bpm}, got {estimate:?}"
             );
             assert!(estimate.confidence > 0.2);
+        }
+    }
+
+    #[test]
+    fn octave_ambiguity_uses_actual_pulse_density() {
+        // Both lags of 128-BPM clicks can correlate strongly; 64-BPM clicks
+        // lack the intervening beats and must not be spuriously doubled.
+        for bpm in [64.0, 128.0, 174.0] {
+            let estimate = detect(&clicks(bpm, 10.0)).expect("regular clicks");
+            assert!(
+                (estimate.bpm as f64 - bpm).abs() < 1.2,
+                "expected {bpm} BPM, got {estimate:?}"
+            );
         }
     }
 
