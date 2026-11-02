@@ -491,4 +491,5 @@ pub const ROWS: &[Row] = &[
     (56, 8, r#"Drive"#, 0.12, r#"12%"#, r#"0% … 100%"#),
     (56, 9, r#"Mix"#, 1.00, r#"100%"#, r#"0% … 100%"#),
     (56, 10, r#"Output Gain"#, 0.50, r#"0.0 dB"#, r#"-12.0 dB … 12.0 dB"#),
+    (56, 11, r#"Native Codec"#, 0.00, r#"Off"#, r#"options: Off, On"#),
 ];
